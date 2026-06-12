@@ -1,0 +1,89 @@
+// ─── server.js ───────────────────────────────────────────────────────────────
+// API REST de pilotage SAVE — Juvi-Group
+import "dotenv/config";
+import express from "express";
+import cors from "cors";
+import { fetchResultsData, fetchVisits } from "./notion.js";
+import { login, requireAuth, filterForUser } from "./auth.js";
+
+const app = express();
+app.use(cors({ origin: process.env.CORS_ORIGIN || "*" }));
+app.use(express.json());
+
+// ─── Cache mémoire simple pour éviter de surcharger l'API Notion ────────────
+const CACHE_TTL = (parseInt(process.env.CACHE_TTL) || 300) * 1000;
+const cache = { results: { data: null, ts: 0 }, visits: { data: null, ts: 0 } };
+
+async function getResults(force = false) {
+  const now = Date.now();
+  if (!force && cache.results.data && now - cache.results.ts < CACHE_TTL) {
+    return cache.results.data;
+  }
+  const data = await fetchResultsData();
+  cache.results = { data, ts: now };
+  return data;
+}
+
+async function getVisits(force = false) {
+  const now = Date.now();
+  if (!force && cache.visits.data && now - cache.visits.ts < CACHE_TTL) {
+    return cache.visits.data;
+  }
+  const data = await fetchVisits();
+  cache.visits = { data, ts: now };
+  return data;
+}
+
+// ─── Routes ──────────────────────────────────────────────────────────────────
+
+// Santé
+app.get("/api/health", (req, res) => res.json({ ok: true, service: "SAVE Pilotage API" }));
+
+// Connexion
+app.post("/api/login", (req, res) => {
+  const { username, password } = req.body || {};
+  const result = login(username, password);
+  if (!result) return res.status(401).json({ error: "Identifiants incorrects" });
+  res.json(result);
+});
+
+// Résultats commerciaux (filtrés selon le rôle)
+app.get("/api/results", requireAuth, async (req, res) => {
+  try {
+    const force = req.query.refresh === "1" && req.user.role === "rz";
+    const data = await getResults(force);
+    res.json(filterForUser(data, req.user));
+  } catch (e) {
+    console.error("Erreur /api/results:", e.message);
+    res.status(502).json({ error: "Lecture Notion impossible", detail: e.message });
+  }
+});
+
+// Visites (RZ voit tout, magasin voit seulement les siennes publiées)
+app.get("/api/visits", requireAuth, async (req, res) => {
+  try {
+    const force = req.query.refresh === "1" && req.user.role === "rz";
+    let visits = await getVisits(force);
+    if (req.user.role !== "rz") {
+      visits = visits.filter(v => v.store === req.user.store && v.published);
+    }
+    res.json({ visits });
+  } catch (e) {
+    console.error("Erreur /api/visits:", e.message);
+    res.status(502).json({ error: "Lecture Notion impossible", detail: e.message });
+  }
+});
+
+// Vide le cache (RZ uniquement)
+app.post("/api/refresh", requireAuth, async (req, res) => {
+  if (req.user.role !== "rz") return res.status(403).json({ error: "Réservé au RZ" });
+  cache.results = { data: null, ts: 0 };
+  cache.visits = { data: null, ts: 0 };
+  res.json({ ok: true, message: "Cache vidé. Prochaine requête relit Notion." });
+});
+
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => {
+  console.log(`✅ API SAVE Pilotage en écoute sur http://localhost:${PORT}`);
+  console.log(`   Pages Notion : P1=${process.env.NOTION_PAGE1_ID?.slice(0,8)}… P2=${process.env.NOTION_PAGE2_ID?.slice(0,8)}…`);
+});
