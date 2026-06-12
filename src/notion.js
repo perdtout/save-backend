@@ -93,6 +93,9 @@ async function parsePage(pageId) {
     } else if (b.type === "callout") {
       const txt = richText(b.callout.rich_text);
       if (txt.trim()) current.paragraphs.push(txt);
+    } else if (b.type === "quote") {
+      const txt = richText(b.quote.rich_text);
+      if (txt.trim()) { current.paragraphs.push(txt); current.quotes = current.quotes || []; current.quotes.push(txt); }
     }
   }
   if (current.heading || current.tables.length || current.paragraphs.length) sections.push(current);
@@ -248,6 +251,27 @@ function extractPeriod(sections) {
   return { period: "", updated: "" };
 }
 
+// ─── Extrait la phrase de synthèse RZ ───────────────────────────────────────
+// Priorité : un bloc contenant "fait marquant" ; sinon le dernier bloc citation.
+function extractSynthese(sections) {
+  let candidate = "";
+  for (const s of sections) {
+    const all = [...(s.quotes || []), ...s.paragraphs];
+    for (const p of all) {
+      if (/fait marquant|à retenir|synthèse|en résumé/i.test(p)) {
+        candidate = p;
+      }
+    }
+  }
+  if (candidate) return candidate.replace(/^[>🎉💡\s]+/, "").trim();
+  // sinon, dernière citation rencontrée
+  let lastQuote = "";
+  for (const s of sections) {
+    if (s.quotes && s.quotes.length) lastQuote = s.quotes[s.quotes.length - 1];
+  }
+  return lastQuote.replace(/^[>🎉💡\s]+/, "").trim();
+}
+
 // ─── API publique du module ─────────────────────────────────────────────────
 export async function fetchResultsData() {
   const [sec1, sec2] = await Promise.all([
@@ -258,10 +282,12 @@ export async function fetchResultsData() {
   const meta = extractPeriod(sec1);
   const page1 = buildPage1(sec1);
   const page2 = buildPage2(sec2);
+  const syntheseRZ = extractSynthese(sec1);
 
   return {
     period: meta.period || "Mois en cours",
     updated: meta.updated || new Date().toLocaleDateString("fr-FR"),
+    syntheseRZ,
     page1,
     page2,
   };
@@ -328,4 +354,54 @@ export async function fetchVisits() {
       url: page.url,
     };
   });
+}
+
+// ─── Historique mensuel : lit la base d'archivage ───────────────────────────
+// Base "Historique Mensuel SAVE". Chaque ligne = un magasin sur un mois donné.
+export async function fetchHistory() {
+  const dsId = process.env.NOTION_HISTORY_DB_ID;
+  if (!dsId) return { months: [], byStore: {} };
+
+  const all = [];
+  let cursor;
+  do {
+    const res = await notion.databases.query({ database_id: dsId, start_cursor: cursor, page_size: 100 });
+    all.push(...res.results);
+    cursor = res.has_more ? res.next_cursor : undefined;
+  } while (cursor);
+
+  const num = (p) => (p?.number ?? null);
+  const txt = (p) => richText(p?.rich_text || []);
+  const sel = (p) => p?.select?.name || "";
+
+  const rows = all.map(page => {
+    const pr = page.properties;
+    return {
+      mois: txt(pr["Mois"]),
+      magasin: sel(pr["Magasin"]),
+      accessoires: num(pr["Ratio Accessoires"]),
+      gp: num(pr["Ratio GP"]),
+      occasion: num(pr["Mobiles Occasion"]),
+      objectifOccasion: num(pr["Objectif Occasion"]),
+      mobileo: num(pr["Forfaits Mobileo"]),
+      atm: num(pr["Ratio ATM"]),
+      margeTotale: num(pr["Marge Totale"]),
+      synthese: txt(pr["Synthèse du mois"]),
+    };
+  }).filter(r => r.mois && r.magasin);
+
+  // Liste triée des mois présents
+  const months = [...new Set(rows.map(r => r.mois))].sort();
+
+  // Regroupé par magasin, chaque magasin -> liste de mois triés
+  const byStore = {};
+  for (const r of rows) {
+    if (!byStore[r.magasin]) byStore[r.magasin] = [];
+    byStore[r.magasin].push(r);
+  }
+  for (const s of Object.keys(byStore)) {
+    byStore[s].sort((a, b) => a.mois.localeCompare(b.mois));
+  }
+
+  return { months, byStore, rows };
 }

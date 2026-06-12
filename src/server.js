@@ -3,7 +3,7 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
-import { fetchResultsData, fetchVisits } from "./notion.js";
+import { fetchResultsData, fetchVisits, fetchHistory } from "./notion.js";
 import { login, requireAuth, filterForUser } from "./auth.js";
 
 const app = express();
@@ -12,7 +12,7 @@ app.use(express.json());
 
 // ─── Cache mémoire simple pour éviter de surcharger l'API Notion ────────────
 const CACHE_TTL = (parseInt(process.env.CACHE_TTL) || 300) * 1000;
-const cache = { results: { data: null, ts: 0 }, visits: { data: null, ts: 0 } };
+const cache = { results: { data: null, ts: 0 }, visits: { data: null, ts: 0 }, history: { data: null, ts: 0 } };
 
 async function getResults(force = false) {
   const now = Date.now();
@@ -31,6 +31,16 @@ async function getVisits(force = false) {
   }
   const data = await fetchVisits();
   cache.visits = { data, ts: now };
+  return data;
+}
+
+async function getHistory(force = false) {
+  const now = Date.now();
+  if (!force && cache.history.data && now - cache.history.ts < CACHE_TTL) {
+    return cache.history.data;
+  }
+  const data = await fetchHistory();
+  cache.history = { data, ts: now };
   return data;
 }
 
@@ -74,11 +84,29 @@ app.get("/api/visits", requireAuth, async (req, res) => {
   }
 });
 
+// Historique mensuel (RZ voit tout, magasin voit seulement le sien)
+app.get("/api/history", requireAuth, async (req, res) => {
+  try {
+    const force = req.query.refresh === "1" && req.user.role === "rz";
+    const data = await getHistory(force);
+    if (req.user.role !== "rz") {
+      const store = req.user.store;
+      const byStore = data.byStore[store] ? { [store]: data.byStore[store] } : {};
+      return res.json({ months: data.months, byStore });
+    }
+    res.json({ months: data.months, byStore: data.byStore });
+  } catch (e) {
+    console.error("Erreur /api/history:", e.message);
+    res.status(502).json({ error: "Lecture Notion impossible", detail: e.message });
+  }
+});
+
 // Vide le cache (RZ uniquement)
 app.post("/api/refresh", requireAuth, async (req, res) => {
   if (req.user.role !== "rz") return res.status(403).json({ error: "Réservé au RZ" });
   cache.results = { data: null, ts: 0 };
   cache.visits = { data: null, ts: 0 };
+  cache.history = { data: null, ts: 0 };
   res.json({ ok: true, message: "Cache vidé. Prochaine requête relit Notion." });
 });
 
