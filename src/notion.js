@@ -268,11 +268,24 @@ export async function fetchResultsData() {
 }
 
 // ─── Visites : lit la base de données ───────────────────────────────────────
+// Colonnes réelles de la base "Suivi Visites Magasins SAVE" :
+//   Titre visite (title), Magasin (select), Date visite (date),
+//   Statut visite (select: Planifiée / Réalisée / Compte-rendu envoyé),
+//   Responsable présent (select), Technicien(s) présent(s) (multi_select),
+//   Points positifs, Points à corriger, Actions décidées, Observations libres,
+//   Objectifs fixés, Objectifs de la visite précédente (text),
+//   Objectifs atteints ? (select), Prochain RDV (date).
 export async function fetchVisits() {
   const dbId = process.env.NOTION_VISITS_DB_ID;
-  const res = await notion.databases.query({ database_id: dbId, page_size: 50 });
+  const res = await notion.databases.query({
+    database_id: dbId,
+    page_size: 50,
+    sorts: [{ property: "Date visite", direction: "descending" }],
+  });
+
   return res.results.map(page => {
     const props = page.properties;
+
     const getTitle = () => {
       const tp = Object.values(props).find(p => p.type === "title");
       return tp ? richText(tp.title) : "";
@@ -281,19 +294,37 @@ export async function fetchVisits() {
       for (const name of names) {
         const p = props[name];
         if (!p) continue;
-        if (type === "checkbox") return p.checkbox;
         if (type === "date") return p.date?.start || "";
         if (type === "select") return p.select?.name || "";
+        if (type === "multi_select") return (p.multi_select || []).map(o => o.name);
         if (type === "rich_text") return richText(p.rich_text);
       }
-      return type === "checkbox" ? false : "";
+      return type === "multi_select" ? [] : "";
     };
+
+    const statut = getProp(["Statut visite", "Statut"], "select");
+    // "Compte-rendu envoyé" = visite publiée et visible par le magasin
+    const published = statut === "Compte-rendu envoyé";
+
+    const techniciens = getProp(["Technicien(s) présent(s)"], "multi_select");
+    const responsable = getProp(["Responsable présent"], "select");
+    const staff = [responsable, ...techniciens].filter(Boolean).filter(s => s !== "Seul en magasin");
+
     return {
       id: page.id,
       title: getTitle(),
-      store: matchStore(getTitle()) || getProp(["Magasin", "Store"], "select"),
-      date: getProp(["Date", "Date visite", "Date de visite"], "date"),
-      published: getProp(["Publié", "Publie", "Published"], "checkbox"),
+      store: getProp(["Magasin", "Store"], "select") || matchStore(getTitle()),
+      date: getProp(["Date visite", "Date", "Date de visite"], "date"),
+      statut,                       // statut brut (Planifiée / Réalisée / Compte-rendu envoyé)
+      published,                    // vrai si compte-rendu envoyé
+      staff,                        // responsable + techniciens présents
+      objectifsAtteints: getProp(["Objectifs atteints ?"], "select"),
+      pointsPositifs: getProp(["Points positifs"], "rich_text"),
+      pointsACorriger: getProp(["Points à corriger"], "rich_text"),
+      actions: getProp(["Actions décidées"], "rich_text"),
+      observations: getProp(["Observations libres"], "rich_text"),
+      objectifsFixes: getProp(["Objectifs fixés"], "rich_text"),
+      prochainRdv: getProp(["Prochain RDV"], "date"),
       url: page.url,
     };
   });
