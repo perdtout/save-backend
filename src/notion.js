@@ -3,6 +3,51 @@
 import { Client } from "@notionhq/client";
 
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
+const NOTION_TOKEN = process.env.NOTION_TOKEN;
+
+// ─── Requête directe sur une base OU une data source ─────────────────────────
+// Les bases Notion "nouvelle génération" exposent leurs lignes via l'endpoint
+// data_sources (API 2025-09-03). On essaie d'abord databases.query (ancien),
+// et si l'objet est introuvable, on bascule sur l'endpoint data_sources.
+async function queryCollection(id) {
+  const all = [];
+  let cursor;
+
+  // Tentative 1 : ancienne API databases.query (pour bases classiques)
+  try {
+    do {
+      const res = await notion.databases.query({ database_id: id, start_cursor: cursor, page_size: 100 });
+      all.push(...res.results);
+      cursor = res.has_more ? res.next_cursor : undefined;
+    } while (cursor);
+    return all;
+  } catch (e) {
+    if (e?.code !== "object_not_found") throw e;
+    // sinon on bascule sur l'API data sources ci-dessous
+  }
+
+  // Tentative 2 : nouvelle API data_sources (REST direct)
+  cursor = undefined;
+  do {
+    const res = await fetch(`https://api.notion.com/v1/data_sources/${id}/query`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${NOTION_TOKEN}`,
+        "Notion-Version": "2025-09-03",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(cursor ? { start_cursor: cursor, page_size: 100 } : { page_size: 100 }),
+    });
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(`data_sources query ${res.status}: ${txt}`);
+    }
+    const json = await res.json();
+    all.push(...(json.results || []));
+    cursor = json.has_more ? json.next_cursor : undefined;
+  } while (cursor);
+  return all;
+}
 
 const STORES = ["Pontarlier", "Lons-le-Saunier", "Dijon", "Besançon", "Chalon-sur-Saône"];
 
@@ -303,13 +348,9 @@ export async function fetchResultsData() {
 //   Objectifs atteints ? (select), Prochain RDV (date).
 export async function fetchVisits() {
   const dbId = process.env.NOTION_VISITS_DB_ID;
-  const res = await notion.databases.query({
-    database_id: dbId,
-    page_size: 50,
-    sorts: [{ property: "Date visite", direction: "descending" }],
-  });
+  const results = await queryCollection(dbId);
 
-  return res.results.map(page => {
+  return results.map(page => {
     const props = page.properties;
 
     const getTitle = () => {
@@ -353,7 +394,7 @@ export async function fetchVisits() {
       prochainRdv: getProp(["Prochain RDV"], "date"),
       url: page.url,
     };
-  });
+  }).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 }
 
 // ─── Historique mensuel : lit la base d'archivage ───────────────────────────
@@ -362,13 +403,7 @@ export async function fetchHistory() {
   const dsId = process.env.NOTION_HISTORY_DB_ID;
   if (!dsId) return { months: [], byStore: {} };
 
-  const all = [];
-  let cursor;
-  do {
-    const res = await notion.databases.query({ database_id: dsId, start_cursor: cursor, page_size: 100 });
-    all.push(...res.results);
-    cursor = res.has_more ? res.next_cursor : undefined;
-  } while (cursor);
+  const all = await queryCollection(dsId);
 
   const num = (p) => (p?.number ?? null);
   const txt = (p) => richText(p?.rich_text || []);
