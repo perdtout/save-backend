@@ -216,66 +216,101 @@ function buildPage1(sections) {
 }
 
 // ─── PAGE 2 : Mobileo / ATM ─────────────────────────────────────────────────
+// Trouve l'index d'une colonne d'après des mots-clés dans la ligne d'en-tête
+function colIndex(header, ...keywords) {
+  for (let i = 0; i < header.length; i++) {
+    const h = (header[i] || "").toLowerCase();
+    if (keywords.some(k => h.includes(k.toLowerCase()))) return i;
+  }
+  return -1;
+}
+
+// Associe les commentaires (puces "Nom (Magasin — …)") à chaque magasin
+function analysisFromBullets(paragraphs) {
+  const out = {};
+  for (const p of paragraphs) {
+    const store = matchStore(p);
+    if (!store) continue;
+    const clean = p.replace(/^[-•*\s]+/, "").replace(/\*\*/g, "").trim();
+    // garde le commentaire le plus complet par magasin
+    if (!out[store] || clean.length > out[store].length) out[store] = clean;
+  }
+  return out;
+}
+
 function buildPage2(sections) {
   const mobileo = {}, atm = {};
   const analysis = { mobileo: {}, atm: {} };
 
-  // Mobileo : tableau par vendeur, on agrège par magasin
+  // ─── Mobileo : tableau par vendeur, agrégé par magasin ───
   const mobSec = findSection(sections, "mobileo");
   if (mobSec?.tables[0]) {
-    for (const row of mobSec.tables[0]) {
-      const store = matchStore(row[0]);
-      const vendeur = (row[1] || "").trim();
+    const table = mobSec.tables[0];
+    const header = table[0] || [];
+    const iTotal = colIndex(header, "total");
+    const iTrend = colIndex(header, "tendance");
+    const iStatut = colIndex(header, "statut");
+    const iVendeur = colIndex(header, "vendeur");
+
+    for (let r = 1; r < table.length; r++) {
+      const row = table[r];
+      const label = (row[0] || "");
+      const store = matchStore(label);
       if (!store) continue;
-      // ignore les lignes "total" intermédiaires
-      const isTotal = (row[0] || "").toLowerCase().includes("total");
-      const total = parseNum(row[row.length - 4]) ?? parseNum(row[5]);
+      const isTotal = label.toLowerCase().includes("total");
+      const vendeur = iVendeur >= 0 ? (row[iVendeur] || "").trim() : "";
+      const totalVal = iTotal >= 0 ? parseNum(row[iTotal]) : null;
+
       if (!mobileo[store]) mobileo[store] = { vendeurs: {}, total: 0, objectif: "10-15", trend: 0, status: "bad" };
+
       if (isTotal) {
-        mobileo[store].total = total ?? mobileo[store].total;
-        mobileo[store].trend = parseTrend(row[row.length - 2]);
-        mobileo[store].status = parseStatus(row[row.length - 1]) || "bad";
+        if (totalVal != null) mobileo[store].total = totalVal;
+        if (iTrend >= 0) mobileo[store].trend = parseTrend(row[iTrend]);
+        if (iStatut >= 0) mobileo[store].status = parseStatus(row[iStatut]) || "bad";
       } else if (vendeur && !vendeur.toLowerCase().includes("total")) {
-        const v = parseNum(row[5]) ?? 0;
-        mobileo[store].vendeurs[vendeur] = v;
-        // magasins solo : total = vendeur unique
-        if (Object.keys(STORE_STAFF_SOLO).includes(store)) {
-          mobileo[store].total = v;
-          mobileo[store].trend = parseTrend(row[row.length - 2]);
-          mobileo[store].status = parseStatus(row[row.length - 1]) || "bad";
+        if (totalVal != null) mobileo[store].vendeurs[vendeur] = totalVal;
+        // magasins solo : la ligne vendeur porte le total du magasin
+        if (STORE_STAFF_SOLO[store]) {
+          if (totalVal != null) mobileo[store].total = totalVal;
+          if (iTrend >= 0) mobileo[store].trend = parseTrend(row[iTrend]);
+          if (iStatut >= 0) mobileo[store].status = parseStatus(row[iStatut]) || "bad";
         }
       }
     }
-    // recalcul total = somme des vendeurs si pas de ligne total
+    // total = somme des vendeurs si pas de ligne "total" explicite
     for (const store of Object.keys(mobileo)) {
       const sum = Object.values(mobileo[store].vendeurs).reduce((a, b) => a + (b || 0), 0);
-      if (!mobileo[store].total) mobileo[store].total = sum;
+      if (!mobileo[store].total && sum) mobileo[store].total = sum;
     }
-    for (const p of mobSec.paragraphs) {
-      const store = matchStore(p);
-      if (store) analysis.mobileo[store] = p.replace(/^[-•\s]+/, "").trim();
-    }
+    analysis.mobileo = analysisFromBullets(mobSec.paragraphs);
   }
 
-  // ATM
+  // ─── ATM : détection des colonnes par en-tête ───
   const atmSec = findSection(sections, "atm", "assurance");
   if (atmSec?.tables[0]) {
-    for (const row of atmSec.tables[0]) {
-      const store = matchStore(row[0]);
+    const table = atmSec.tables[0];
+    const header = table[0] || [];
+    const iAtm = colIndex(header, "total atm", "atm vendus", "atm");
+    const iOcc = colIndex(header, "occ");
+    const iRatio = colIndex(header, "ratio");
+    const iTrend = colIndex(header, "tendance");
+    const iStatut = colIndex(header, "statut");
+
+    for (let r = 1; r < table.length; r++) {
+      const row = table[r];
+      const label = (row[0] || "");
+      const store = matchStore(label);
       if (!store) continue;
-      if ((row[0] || "").toLowerCase().includes("total")) continue;
+      if (label.toLowerCase().includes("total")) continue;
       atm[store] = {
-        total: parseNum(row[4]) ?? 0,
-        mobOcc: parseNum(row[5]) ?? 0,
-        ratio: parseNum(row[6]) ?? 0,
-        trend: parseTrend(row[7]),
-        status: parseStatus(row[8]) || "bad",
+        total: (iAtm >= 0 ? parseNum(row[iAtm]) : null) ?? 0,
+        mobOcc: (iOcc >= 0 ? parseNum(row[iOcc]) : null) ?? 0,
+        ratio: (iRatio >= 0 ? parseNum(row[iRatio]) : null) ?? 0,
+        trend: iTrend >= 0 ? parseTrend(row[iTrend]) : 0,
+        status: (iStatut >= 0 ? parseStatus(row[iStatut]) : null) || "bad",
       };
     }
-    for (const p of atmSec.paragraphs) {
-      const store = matchStore(p);
-      if (store) analysis.atm[store] = p.replace(/^[-•\s]+/, "").trim();
-    }
+    analysis.atm = analysisFromBullets(atmSec.paragraphs);
   }
 
   return { mobileo, atm, analysis };
