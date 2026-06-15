@@ -331,25 +331,40 @@ function extractPeriod(sections) {
   return { period: "", updated: "" };
 }
 
-// ─── Extrait la phrase de synthèse RZ ───────────────────────────────────────
-// Priorité : un bloc contenant "fait marquant" ; sinon le dernier bloc citation.
+// ─── Extrait la phrase de synthèse RZ (fait marquant / ce que je retiens) ────
+// Cherche la SECTION dont le titre évoque le fait marquant, et renvoie son texte.
+// Tolère plusieurs intitulés et fonctionne sur les deux pages.
 function extractSynthese(sections) {
-  let candidate = "";
+  const TITLE_RE = /fait marquant|ce que je retiens|à retenir|synthèse de la journée|en résumé/i;
+
+  // 1) Section dédiée : on prend ses paragraphes/citations comme contenu
   for (const s of sections) {
-    const all = [...(s.quotes || []), ...s.paragraphs];
-    for (const p of all) {
-      if (/fait marquant|à retenir|synthèse|en résumé/i.test(p)) {
-        candidate = p;
-      }
+    if (TITLE_RE.test(s.heading || "")) {
+      const body = [...(s.paragraphs || []), ...(s.quotes || [])]
+        .map(t => t.replace(/^[>🎉💡⭐✨\s]+/, "").trim())
+        .filter(Boolean)
+        .join("\n");
+      if (body) return body;
     }
   }
-  if (candidate) return candidate.replace(/^[>🎉💡\s]+/, "").trim();
-  // sinon, dernière citation rencontrée
+
+  // 2) Sinon : un paragraphe/citation qui contient l'intitulé en ligne
+  let candidate = "";
+  for (const s of sections) {
+    for (const p of [...(s.quotes || []), ...s.paragraphs]) {
+      if (TITLE_RE.test(p)) candidate = p;
+    }
+  }
+  if (candidate) {
+    return candidate.replace(/^[>🎉💡⭐✨\s]+/, "").replace(/^(fait marquant|ce que je retiens[^:]*)\s*:?\s*/i, "").trim();
+  }
+
+  // 3) Dernier recours : dernière citation de la page
   let lastQuote = "";
   for (const s of sections) {
     if (s.quotes && s.quotes.length) lastQuote = s.quotes[s.quotes.length - 1];
   }
-  return lastQuote.replace(/^[>🎉💡\s]+/, "").trim();
+  return lastQuote.replace(/^[>🎉💡⭐✨\s]+/, "").trim();
 }
 
 // ─── API publique du module ─────────────────────────────────────────────────
@@ -362,12 +377,19 @@ export async function fetchResultsData() {
   const meta = extractPeriod(sec1);
   const page1 = buildPage1(sec1);
   const page2 = buildPage2(sec2);
-  const syntheseRZ = extractSynthese(sec1);
+
+  // Fait marquant : on prend celui de la Page 1 en priorité, sinon Page 2
+  const synthese1 = extractSynthese(sec1);
+  const synthese2 = extractSynthese(sec2);
+  const syntheseRZ = synthese1 || synthese2;
+  // Les deux faits marquants, si tu en mets un différent par page
+  const faitsMarquants = [synthese1, synthese2].filter(Boolean);
 
   return {
     period: meta.period || "Mois en cours",
     updated: meta.updated || new Date().toLocaleDateString("fr-FR"),
     syntheseRZ,
+    faitsMarquants,
     page1,
     page2,
   };

@@ -44,6 +44,8 @@ export function filterForUser(data, user) {
   const pickAnalysis = (obj) => (obj && obj[store] ? { [store]: obj[store] } : {});
   return {
     period: data.period,
+    syntheseRZ: data.syntheseRZ,
+    faitsMarquants: data.faitsMarquants,
     updated: data.updated,
     page1: {
       accessoires: pick(data.page1.accessoires),
