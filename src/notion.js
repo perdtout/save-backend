@@ -497,3 +497,104 @@ export async function fetchHistory() {
 
   return { months, byStore, rows };
 }
+
+// ─── GOAT : lit la base "🐐 GOAT — Performance Vendeurs" ────────────────────
+// Une ligne = un vendeur sur une période (Type période = "Semaine" ou "Mois").
+// Colonnes brutes : Vendeur (title), Magasin (select), Type période (select),
+//   Période (rich_text), Date début (date), Solo (checkbox),
+//   Ratio Accessoires % / Ratio GP % / Contrats Mobileo / Objectif Mobileo
+//   individuel / ATM vendus / Mobiles Occasion vendus / Prime ATM € (mois
+//   historique) (number), MVP attribué (checkbox), Notes (rich_text).
+// Colonnes calculées (formula, lues via property.formula.number) :
+//   Score Accessoires / Score GP / Score Mobileo / Ratio ATM % /
+//   Score ATM (calculé) / Score brut / Score final.
+
+const goatGetTitle = (props) => {
+  const tp = Object.values(props).find(p => p.type === "title");
+  return tp ? richText(tp.title) : "";
+};
+
+const goatGetProp = (props, names, type) => {
+  for (const name of names) {
+    const p = props[name];
+    if (!p) continue;
+    if (type === "select") return p.select?.name || "";
+    if (type === "checkbox") return !!p.checkbox;
+    if (type === "number") return p.number ?? null;
+    if (type === "formula_number") return p.formula?.number ?? null;
+    if (type === "rich_text") return richText(p.rich_text);
+    if (type === "date") return p.date?.start || "";
+  }
+  return null;
+};
+
+function parseGoatRow(page) {
+  const props = page.properties;
+  const breakdown = {
+    accessoires: goatGetProp(props, ["Score Accessoires"], "formula_number") ?? 0,
+    gp:          goatGetProp(props, ["Score GP"], "formula_number") ?? 0,
+    mobileo:     goatGetProp(props, ["Score Mobileo"], "formula_number") ?? 0,
+    atm:         goatGetProp(props, ["Score ATM (calculé)"], "formula_number") ?? 0,
+  };
+  return {
+    name:        goatGetTitle(props),
+    store:       goatGetProp(props, ["Magasin"], "select"),
+    periodType:  goatGetProp(props, ["Type période"], "select"), // "Semaine" | "Mois"
+    periodLabel: goatGetProp(props, ["Période"], "rich_text"),
+    periodStart: goatGetProp(props, ["Date début"], "date"),
+    isSolo:      goatGetProp(props, ["Solo"], "checkbox"),
+    mvp:         goatGetProp(props, ["MVP attribué"], "checkbox"),
+    total:       goatGetProp(props, ["Score final"], "formula_number") ?? 0,
+    breakdown,
+  };
+}
+
+// Regroupe les lignes par période (label) et renvoie [{ label, start, scores: [...] }, ...]
+// triées de la plus récente à la plus ancienne (par Date début).
+function groupGoatByPeriod(rows) {
+  const byLabel = {};
+  for (const r of rows) {
+    if (!r.periodLabel) continue;
+    if (!byLabel[r.periodLabel]) byLabel[r.periodLabel] = { label: r.periodLabel, start: r.periodStart, scores: [] };
+    byLabel[r.periodLabel].scores.push({
+      name: r.name, store: r.store, total: r.total, isSolo: r.isSolo, breakdown: r.breakdown,
+    });
+  }
+  return Object.values(byLabel).sort((a, b) => (b.start || "").localeCompare(a.start || ""));
+}
+
+export async function fetchGoatData() {
+  const dsId = process.env.NOTION_GOAT_DB_ID;
+  if (!dsId) return { weekly: null, monthly: null, titlesHistory: [] };
+
+  const pages = await queryCollection(dsId);
+  const rows = pages.map(parseGoatRow).filter(r => r.name && r.periodType);
+
+  const weeklyRows = rows.filter(r => r.periodType === "Semaine");
+  const monthlyRows = rows.filter(r => r.periodType === "Mois");
+
+  const weeklyPeriods = groupGoatByPeriod(weeklyRows);
+  const monthlyPeriods = groupGoatByPeriod(monthlyRows);
+
+  const weekly = weeklyPeriods[0]
+    ? { label: weeklyPeriods[0].label, scores: weeklyPeriods[0].scores.sort((a, b) => b.total - a.total) }
+    : null;
+  const monthly = monthlyPeriods[0]
+    ? { label: monthlyPeriods[0].label, scores: monthlyPeriods[0].scores.sort((a, b) => b.total - a.total) }
+    : null;
+
+  // Historique des titres : une entrée par ligne où MVP attribué est coché,
+  // triée de la plus récente à la plus ancienne. Les égalités (co-MVP) sur
+  // une même Période apparaissent comme deux entrées séparées, naturellement.
+  const titlesHistory = rows
+    .filter(r => r.mvp)
+    .sort((a, b) => (b.periodStart || "").localeCompare(a.periodStart || ""))
+    .map(r => ({
+      type: r.periodType === "Semaine" ? "week" : "month",
+      label: r.periodLabel,
+      winner: r.name,
+      score: r.total,
+    }));
+
+  return { weekly, monthly, titlesHistory };
+}
