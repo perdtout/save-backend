@@ -3,22 +3,25 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
-import { fetchResultsData, fetchVisits, fetchHistory } from "./notion.js";
+import { fetchResultsData, fetchVisits, fetchHistory, fetchGoatData } from "./notion.js";
 import { login, requireAuth, filterForUser } from "./auth.js";
 
 const app = express();
 app.use(cors({ origin: process.env.CORS_ORIGIN || "*" }));
 app.use(express.json());
 
-// ─── Cache mémoire simple pour éviter de surcharger l'API Notion ────────────
+// ─── Cache mémoire simple ────────────────────────────────────────────────────
 const CACHE_TTL = (parseInt(process.env.CACHE_TTL) || 300) * 1000;
-const cache = { results: { data: null, ts: 0 }, visits: { data: null, ts: 0 }, history: { data: null, ts: 0 } };
+const cache = {
+  results: { data: null, ts: 0 },
+  visits:  { data: null, ts: 0 },
+  history: { data: null, ts: 0 },
+  goat:    { data: null, ts: 0 },
+};
 
 async function getResults(force = false) {
   const now = Date.now();
-  if (!force && cache.results.data && now - cache.results.ts < CACHE_TTL) {
-    return cache.results.data;
-  }
+  if (!force && cache.results.data && now - cache.results.ts < CACHE_TTL) return cache.results.data;
   const data = await fetchResultsData();
   cache.results = { data, ts: now };
   return data;
@@ -26,9 +29,7 @@ async function getResults(force = false) {
 
 async function getVisits(force = false) {
   const now = Date.now();
-  if (!force && cache.visits.data && now - cache.visits.ts < CACHE_TTL) {
-    return cache.visits.data;
-  }
+  if (!force && cache.visits.data && now - cache.visits.ts < CACHE_TTL) return cache.visits.data;
   const data = await fetchVisits();
   cache.visits = { data, ts: now };
   return data;
@@ -36,11 +37,17 @@ async function getVisits(force = false) {
 
 async function getHistory(force = false) {
   const now = Date.now();
-  if (!force && cache.history.data && now - cache.history.ts < CACHE_TTL) {
-    return cache.history.data;
-  }
+  if (!force && cache.history.data && now - cache.history.ts < CACHE_TTL) return cache.history.data;
   const data = await fetchHistory();
   cache.history = { data, ts: now };
+  return data;
+}
+
+async function getGoat(force = false) {
+  const now = Date.now();
+  if (!force && cache.goat.data && now - cache.goat.ts < CACHE_TTL) return cache.goat.data;
+  const data = await fetchGoatData();
+  cache.goat = { data, ts: now };
   return data;
 }
 
@@ -57,7 +64,7 @@ app.post("/api/login", (req, res) => {
   res.json(result);
 });
 
-// Résultats commerciaux (filtrés selon le rôle)
+// Résultats commerciaux
 app.get("/api/results", requireAuth, async (req, res) => {
   try {
     const force = req.query.refresh === "1" && req.user.role === "rz";
@@ -69,7 +76,7 @@ app.get("/api/results", requireAuth, async (req, res) => {
   }
 });
 
-// Visites (RZ voit tout, magasin voit seulement les siennes publiées)
+// Visites
 app.get("/api/visits", requireAuth, async (req, res) => {
   try {
     const force = req.query.refresh === "1" && req.user.role === "rz";
@@ -84,7 +91,7 @@ app.get("/api/visits", requireAuth, async (req, res) => {
   }
 });
 
-// Historique mensuel (RZ voit tout, magasin voit seulement le sien)
+// Historique mensuel
 app.get("/api/history", requireAuth, async (req, res) => {
   try {
     const force = req.query.refresh === "1" && req.user.role === "rz";
@@ -101,12 +108,27 @@ app.get("/api/history", requireAuth, async (req, res) => {
   }
 });
 
+// GOAT — classement individuel des vendeurs
+// Accessible à tous les utilisateurs authentifiés.
+// Les magasins voient l'onglet en lecture seule (leurs propres données sont incluses).
+app.get("/api/goat", requireAuth, async (req, res) => {
+  try {
+    const force = req.query.refresh === "1" && req.user.role === "rz";
+    const data = await getGoat(force);
+    res.json(data);
+  } catch (e) {
+    console.error("Erreur /api/goat:", e.message);
+    res.status(502).json({ error: "Lecture Notion impossible", detail: e.message });
+  }
+});
+
 // Vide le cache (RZ uniquement)
 app.post("/api/refresh", requireAuth, async (req, res) => {
   if (req.user.role !== "rz") return res.status(403).json({ error: "Réservé au RZ" });
   cache.results = { data: null, ts: 0 };
-  cache.visits = { data: null, ts: 0 };
+  cache.visits  = { data: null, ts: 0 };
   cache.history = { data: null, ts: 0 };
+  cache.goat    = { data: null, ts: 0 };
   res.json({ ok: true, message: "Cache vidé. Prochaine requête relit Notion." });
 });
 
@@ -114,4 +136,5 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`✅ API SAVE Pilotage en écoute sur http://localhost:${PORT}`);
   console.log(`   Pages Notion : P1=${process.env.NOTION_PAGE1_ID?.slice(0,8)}… P2=${process.env.NOTION_PAGE2_ID?.slice(0,8)}…`);
+  console.log(`   GOAT DB : ${process.env.NOTION_GOAT_DB_ID?.slice(0,8)}…`);
 });
