@@ -3,7 +3,7 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
-import { fetchResultsData, fetchVisits, fetchHistory, fetchGoatData } from "./notion.js";
+import { fetchResultsData, fetchVisits, fetchHistory, fetchGoatData, fetchVendorsMTD, fetchActions } from "./notion.js";
 import { login, requireAuth, filterForUser } from "./auth.js";
 
 const app = express();
@@ -17,6 +17,8 @@ const cache = {
   visits:  { data: null, ts: 0 },
   history: { data: null, ts: 0 },
   goat:    { data: null, ts: 0 },
+  vendors: { data: null, ts: 0 },
+  actions: { data: null, ts: 0 },
 };
 
 async function getResults(force = false) {
@@ -48,6 +50,22 @@ async function getGoat(force = false) {
   if (!force && cache.goat.data && now - cache.goat.ts < CACHE_TTL) return cache.goat.data;
   const data = await fetchGoatData();
   cache.goat = { data, ts: now };
+  return data;
+}
+
+async function getVendors(force = false) {
+  const now = Date.now();
+  if (!force && cache.vendors.data && now - cache.vendors.ts < CACHE_TTL) return cache.vendors.data;
+  const data = await fetchVendorsMTD();
+  cache.vendors = { data, ts: now };
+  return data;
+}
+
+async function getActions(force = false) {
+  const now = Date.now();
+  if (!force && cache.actions.data && now - cache.actions.ts < CACHE_TTL) return cache.actions.data;
+  const data = await fetchActions();
+  cache.actions = { data, ts: now };
   return data;
 }
 
@@ -122,6 +140,38 @@ app.get("/api/goat", requireAuth, async (req, res) => {
   }
 });
 
+// Résultats par vendeur — cumul du mois en cours
+// Un magasin ne voit que ses propres vendeurs.
+app.get("/api/vendors", requireAuth, async (req, res) => {
+  try {
+    const force = req.query.refresh === "1" && req.user.role === "rz";
+    const data = await getVendors(force);
+    if (req.user.role !== "rz") {
+      return res.json({ periode: data.periode, vendors: data.vendors.filter(v => v.store === req.user.store) });
+    }
+    res.json(data);
+  } catch (e) {
+    console.error("Erreur /api/vendors:", e.message);
+    res.status(502).json({ error: "Lecture Notion impossible", detail: e.message });
+  }
+});
+
+// Plans d'action magasins
+// Le magasin ne voit que ses actions publiées ; le RZ voit tout.
+app.get("/api/actions", requireAuth, async (req, res) => {
+  try {
+    const force = req.query.refresh === "1" && req.user.role === "rz";
+    let actions = await getActions(force);
+    if (req.user.role !== "rz") {
+      actions = actions.filter(a => a.store === req.user.store && a.published);
+    }
+    res.json({ actions });
+  } catch (e) {
+    console.error("Erreur /api/actions:", e.message);
+    res.status(502).json({ error: "Lecture Notion impossible", detail: e.message });
+  }
+});
+
 // Vide le cache (RZ uniquement)
 app.post("/api/refresh", requireAuth, async (req, res) => {
   if (req.user.role !== "rz") return res.status(403).json({ error: "Réservé au RZ" });
@@ -129,6 +179,8 @@ app.post("/api/refresh", requireAuth, async (req, res) => {
   cache.visits  = { data: null, ts: 0 };
   cache.history = { data: null, ts: 0 };
   cache.goat    = { data: null, ts: 0 };
+  cache.vendors = { data: null, ts: 0 };
+  cache.actions = { data: null, ts: 0 };
   res.json({ ok: true, message: "Cache vidé. Prochaine requête relit Notion." });
 });
 

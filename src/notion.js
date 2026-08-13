@@ -600,3 +600,106 @@ export async function fetchGoatData() {
 
   return { weekly, monthly, titlesHistory };
 }
+
+// ─── VENDEURS : cumul du mois en cours ──────────────────────────────────────
+// Aucune ligne "Mois" n'existe tant que le mois n'est pas terminé : on agrège
+// donc les lignes "Jour" du mois courant. Bonus : le résultat est à jour au
+// jour près, et les colonnes mal remplies au niveau mensuel (mobiles occasion)
+// sont couvertes par le détail journalier.
+const VENDOR_ROLES = {
+  "Mathis": "Responsable", "Narcisse": "Technicien",
+  "Jérôme": "Responsable", "Nassim": "Technicien",
+  "Jules": "Responsable", "Bilhal": "Technicien",
+  "Jean-Baptiste": "Seul en magasin", "Samy": "Seul en magasin",
+};
+
+const num = (p) => (p?.number ?? null);
+
+function moisCourantISO(ref = new Date()) {
+  const y = ref.getFullYear(), m = String(ref.getMonth() + 1).padStart(2, "0");
+  return { debut: `${y}-${m}-01`, cle: `${y}-${m}` };
+}
+
+export async function fetchVendorsMTD() {
+  const dsId = process.env.NOTION_GOAT_DB_ID;
+  if (!dsId) return { periode: null, vendors: [] };
+
+  const { debut, cle } = moisCourantISO();
+  const pages = await queryCollection(dsId);
+
+  const agg = {};
+  for (const page of pages) {
+    const pr = page.properties;
+    const type = pr["Type période"]?.select?.name;
+    if (type !== "Jour") continue;
+    const jour = pr["Date début"]?.date?.start || "";
+    if (!jour || jour < debut) continue;
+
+    const nom = richText(Object.values(pr).find(p => p.type === "title")?.title || []);
+    if (!nom) continue;
+    const magasin = pr["Magasin"]?.select?.name || "";
+    const k = `${magasin}::${nom}`;
+    if (!agg[k]) {
+      agg[k] = {
+        name: nom, store: magasin, role: VENDOR_ROLES[nom] || "",
+        margeTotale: 0, margeAccessoires: 0, margeGP: 0,
+        mobileo: 0, atm: 0, occasion: 0, jours: 0, dernierJour: "",
+      };
+    }
+    const a = agg[k];
+    const marge = num(pr["Marge Totale €"]) || 0;
+    a.margeTotale       += marge;
+    a.margeAccessoires  += num(pr["Marge Accessoires €"]) || 0;
+    a.margeGP           += num(pr["Marge GP €"]) || 0;
+    a.mobileo           += num(pr["Contrats Mobileo"]) || 0;
+    a.atm               += num(pr["ATM vendus"]) || 0;
+    a.occasion          += num(pr["Mobiles Occasion vendus"]) || 0;
+    if (marge > 0) a.jours += 1;
+    if (jour > a.dernierJour) a.dernierJour = jour;
+  }
+
+  const vendors = Object.values(agg).map(v => ({
+    ...v,
+    margeTotale: Math.round(v.margeTotale),
+    margeAccessoires: Math.round(v.margeAccessoires),
+    margeGP: Math.round(v.margeGP),
+    ratioAccessoires: v.margeTotale > 0 ? +((v.margeAccessoires / v.margeTotale) * 100).toFixed(1) : null,
+    ratioGP:          v.margeTotale > 0 ? +((v.margeGP / v.margeTotale) * 100).toFixed(1) : null,
+    ratioATM:         v.occasion > 0 ? +((v.atm / v.occasion) * 100).toFixed(1) : null,
+  })).sort((a, b) => b.margeTotale - a.margeTotale);
+
+  return { periode: cle, vendors };
+}
+
+// ─── PLANS D'ACTION MAGASINS ────────────────────────────────────────────────
+// Base "🎯 Plans d'action magasins — Zone SAVE". Une ligne = une action.
+// La case "Publié" commande la visibilité côté magasin, comme pour les visites.
+export async function fetchActions() {
+  const dsId = process.env.NOTION_ACTIONS_DB_ID;
+  if (!dsId) return [];
+
+  const pages = await queryCollection(dsId);
+  const ORDRE = { "À faire": 0, "En cours": 1, "Fait": 2 };
+
+  return pages.map(page => {
+    const pr = page.properties;
+    return {
+      id: page.id,
+      title: richText(Object.values(pr).find(p => p.type === "title")?.title || []),
+      store: pr["Magasin"]?.select?.name || "",
+      who: pr["Concerne"]?.select?.name || "",
+      indicator: pr["Indicateur"]?.select?.name || "",
+      state: pr["État"]?.select?.name || "À faire",
+      due: pr["Échéance"]?.date?.start || "",
+      month: richText(pr["Mois"]?.rich_text || []),
+      origin: pr["Origine"]?.select?.name || "",
+      published: !!pr["Publié"]?.checkbox,
+      notes: richText(pr["Notes"]?.rich_text || []),
+      url: page.url,
+    };
+  })
+  .filter(a => a.title && a.store)
+  .sort((a, b) =>
+    (ORDRE[a.state] ?? 0) - (ORDRE[b.state] ?? 0) ||
+    (a.due || "9999").localeCompare(b.due || "9999"));
+}
