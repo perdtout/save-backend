@@ -588,6 +588,8 @@ export async function fetchGoatData() {
   // Historique des titres : une entrée par ligne où MVP attribué est coché,
   // triée de la plus récente à la plus ancienne. Les égalités (co-MVP) sur
   // une même Période apparaissent comme deux entrées séparées, naturellement.
+  // La date de début est indispensable côté app : c'est elle qui rattache
+  // chaque titre à sa saison (juin → mai de l'année suivante).
   const titlesHistory = rows
     .filter(r => r.mvp)
     .sort((a, b) => (b.periodStart || "").localeCompare(a.periodStart || ""))
@@ -595,7 +597,9 @@ export async function fetchGoatData() {
       type: r.periodType === "Semaine" ? "week" : "month",
       label: r.periodLabel,
       winner: r.name,
+      store: r.store,
       score: r.total,
+      start: r.periodStart || "",
     }));
 
   return { weekly, monthly, titlesHistory };
