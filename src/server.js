@@ -71,8 +71,50 @@ async function getActions(force = false) {
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
-// Santé
-app.get("/api/health", (req, res) => res.json({ ok: true, service: "SAVE Pilotage API" }));
+// Santé + diagnostic de configuration
+// Ne renvoie jamais de valeur secrète : uniquement la présence ou l'absence de
+// chaque variable, pour vérifier une configuration sans ouvrir Render.
+app.get("/api/health", (req, res) => res.json({
+  ok: true,
+  service: "SAVE Pilotage API",
+  config: {
+    notionToken:  !!process.env.NOTION_TOKEN,
+    page1:        !!process.env.NOTION_PAGE1_ID,
+    page2:        !!process.env.NOTION_PAGE2_ID,
+    visitsDb:     !!process.env.NOTION_VISITS_DB_ID,
+    historyDb:    !!process.env.NOTION_HISTORY_DB_ID,
+    goatDb:       !!process.env.NOTION_GOAT_DB_ID,
+    actionsDb:    !!process.env.NOTION_ACTIONS_DB_ID,
+  },
+}));
+
+// Diagnostic de lecture de la base des plans d'action (RZ uniquement).
+// Distingue les trois causes possibles : variable absente, base non partagée
+// avec l'intégration, ou base simplement vide.
+app.get("/api/actions/debug", requireAuth, async (req, res) => {
+  if (req.user.role !== "rz") return res.status(403).json({ error: "Réservé au RZ" });
+  if (!process.env.NOTION_ACTIONS_DB_ID) {
+    return res.json({ ok: false, cause: "NOTION_ACTIONS_DB_ID absent des variables d'environnement" });
+  }
+  try {
+    const actions = await fetchActions();
+    res.json({
+      ok: true,
+      id: process.env.NOTION_ACTIONS_DB_ID,
+      total: actions.length,
+      publiees: actions.filter(a => a.published).length,
+      parMagasin: actions.reduce((acc, a) => ({ ...acc, [a.store]: (acc[a.store] || 0) + 1 }), {}),
+      cause: actions.length ? null : "Base lue mais vide, ou lignes sans titre/magasin",
+    });
+  } catch (e) {
+    res.status(502).json({
+      ok: false,
+      id: process.env.NOTION_ACTIONS_DB_ID,
+      cause: "Lecture Notion refusée — l'intégration n'a probablement pas accès à la base, ou l'identifiant n'est pas le bon",
+      detail: e.message,
+    });
+  }
+});
 
 // Connexion
 app.post("/api/login", (req, res) => {
