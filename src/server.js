@@ -3,7 +3,7 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
-import { fetchResultsData, fetchVisits, fetchHistory, fetchGoatData, fetchVendorsMTD, fetchActions } from "./notion.js";
+import { fetchResultsData, fetchVisits, fetchHistory, fetchGoatBundle, fetchActions } from "./notion.js";
 import { login, requireAuth, filterForUser } from "./auth.js";
 
 const app = express();
@@ -16,10 +16,10 @@ const cache = {
   results: { data: null, ts: 0 },
   visits:  { data: null, ts: 0 },
   history: { data: null, ts: 0 },
-  goat:    { data: null, ts: 0 },
-  vendors: { data: null, ts: 0 },
+  goatBundle: { data: null, ts: 0 },
   actions: { data: null, ts: 0 },
 };
+let goatBundleRequest = null;
 
 async function getResults(force = false) {
   const now = Date.now();
@@ -45,20 +45,20 @@ async function getHistory(force = false) {
   return data;
 }
 
-async function getGoat(force = false) {
+async function getGoatBundle(force = false) {
   const now = Date.now();
-  if (!force && cache.goat.data && now - cache.goat.ts < CACHE_TTL) return cache.goat.data;
-  const data = await fetchGoatData();
-  cache.goat = { data, ts: now };
-  return data;
-}
-
-async function getVendors(force = false) {
-  const now = Date.now();
-  if (!force && cache.vendors.data && now - cache.vendors.ts < CACHE_TTL) return cache.vendors.data;
-  const data = await fetchVendorsMTD();
-  cache.vendors = { data, ts: now };
-  return data;
+  if (!force && cache.goatBundle.data && now - cache.goatBundle.ts < CACHE_TTL) return cache.goatBundle.data;
+  // /api/goat et /api/vendors arrivent en parallèle depuis le frontend.
+  // Ils partagent la même promesse pour ne lire la collection Notion qu'une fois.
+  if (!goatBundleRequest) {
+    goatBundleRequest = fetchGoatBundle()
+      .then(data => {
+        cache.goatBundle = { data, ts: Date.now() };
+        return data;
+      })
+      .finally(() => { goatBundleRequest = null; });
+  }
+  return goatBundleRequest;
 }
 
 async function getActions(force = false) {
@@ -174,8 +174,8 @@ app.get("/api/history", requireAuth, async (req, res) => {
 app.get("/api/goat", requireAuth, async (req, res) => {
   try {
     const force = req.query.refresh === "1" && req.user.role === "rz";
-    const data = await getGoat(force);
-    res.json(data);
+    const data = await getGoatBundle(force);
+    res.json(data.goat);
   } catch (e) {
     console.error("Erreur /api/goat:", e.message);
     res.status(502).json({ error: "Lecture Notion impossible", detail: e.message });
@@ -187,7 +187,7 @@ app.get("/api/goat", requireAuth, async (req, res) => {
 app.get("/api/vendors", requireAuth, async (req, res) => {
   try {
     const force = req.query.refresh === "1" && req.user.role === "rz";
-    const data = await getVendors(force);
+    const data = (await getGoatBundle(force)).vendors;
     if (req.user.role !== "rz") {
       return res.json({ periode: data.periode, vendors: data.vendors.filter(v => v.store === req.user.store) });
     }
@@ -220,8 +220,7 @@ app.post("/api/refresh", requireAuth, async (req, res) => {
   cache.results = { data: null, ts: 0 };
   cache.visits  = { data: null, ts: 0 };
   cache.history = { data: null, ts: 0 };
-  cache.goat    = { data: null, ts: 0 };
-  cache.vendors = { data: null, ts: 0 };
+  cache.goatBundle = { data: null, ts: 0 };
   cache.actions = { data: null, ts: 0 };
   res.json({ ok: true, message: "Cache vidé. Prochaine requête relit Notion." });
 });

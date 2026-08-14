@@ -44,9 +44,12 @@ export function filterForUser(data, user) {
   const pickAnalysis = (obj) => (obj && obj[store] ? { [store]: obj[store] } : {});
   return {
     period: data.period,
-    syntheseRZ: data.syntheseRZ,
-    faitsMarquants: data.faitsMarquants,
+    // La synthèse RZ contient des commentaires sur toute la zone. Les comptes
+    // magasin disposent déjà de leurs analyses dédiées ci-dessous.
+    syntheseRZ: "",
+    faitsMarquants: [],
     updated: data.updated,
+    workdays: data.workdays,
     page1: {
       accessoires: pick(data.page1.accessoires),
       gp: pick(data.page1.gp),

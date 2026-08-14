@@ -55,7 +55,13 @@ const STORES = ["Pontarlier", "Lons-le-Saunier", "Dijon", "Besançon", "Chalon-s
 const OCC_OBJ = { "Pontarlier": 50, "Lons-le-Saunier": 50, "Dijon": 25, "Besançon": 20, "Chalon-sur-Saône": 15 };
 
 // ─── Helpers d'extraction de texte ──────────────────────────────────────────
-const richText = (arr) => (arr || []).map(t => t.plain_text).join("");
+const richText = (arr) => (arr || [])
+  .map(t => t.plain_text)
+  .join("")
+  // Certaines listes Notion renvoient ponctuellement le caractère de
+  // remplacement Unicode à la place de l'emoji de puce. On conserve la
+  // lisibilité du texte sans altérer les chiffres ni les noms.
+  .replace(/\uFFFD/g, "•");
 
 // Normalise un nombre français "1 906 €" / "32,3 %" -> 1906 / 32.3
 const parseNum = (s) => {
@@ -151,6 +157,16 @@ async function parsePage(pageId) {
 const findSection = (sections, ...keywords) =>
   sections.find(s => keywords.some(k => s.heading.toLowerCase().includes(k.toLowerCase())));
 
+// Trouve l'index d'une colonne d'après des mots-clés dans la ligne d'en-tête.
+// `fallback` maintient la compatibilité avec les anciennes trames sans en-tête.
+function colIndex(header, keywords, fallback = -1) {
+  for (let i = 0; i < header.length; i++) {
+    const h = (header[i] || "").toLowerCase();
+    if (keywords.some(k => h.includes(k.toLowerCase()))) return i;
+  }
+  return fallback;
+}
+
 // ─── PAGE 1 : Accessoires / GP / Occasion ───────────────────────────────────
 function buildPage1(sections) {
   const accessoires = {}, gp = {}, occasion = {};
@@ -159,15 +175,23 @@ function buildPage1(sections) {
   // Accessoires : section avec "accessoires" dans le titre
   const accSec = findSection(sections, "accessoires");
   if (accSec?.tables[0]) {
-    for (const row of accSec.tables[0]) {
-      const store = matchStore(row[0]);
+    const table = accSec.tables[0];
+    const header = table[0] || [];
+    const iStore = colIndex(header, ["magasin"], 0);
+    const iMarge = colIndex(header, ["marge access"], 1);
+    const iTotal = colIndex(header, ["marge totale"], 2);
+    const iRatio = colIndex(header, ["ratio"], 3);
+    const iTrend = colIndex(header, ["tendance"], 4);
+    const iStatus = colIndex(header, ["statut"], 5);
+    for (const row of table.slice(1)) {
+      const store = matchStore(row[iStore]);
       if (!store) continue;
       accessoires[store] = {
-        margeAcc: parseNum(row[1]),
-        margeTotal: parseNum(row[2]),
-        ratio: parseNum(row[3]),
-        trend: parseTrend(row[4]),
-        status: parseStatus(row[5]) || "bad",
+        margeAcc: parseNum(row[iMarge]),
+        margeTotal: parseNum(row[iTotal]),
+        ratio: parseNum(row[iRatio]),
+        trend: parseTrend(row[iTrend]),
+        status: parseStatus(row[iStatus]) || "bad",
       };
     }
     // Commentaires : paragraphes mentionnant un magasin
@@ -180,15 +204,23 @@ function buildPage1(sections) {
   // GP
   const gpSec = findSection(sections, "garantie", "gp");
   if (gpSec?.tables[0]) {
-    for (const row of gpSec.tables[0]) {
-      const store = matchStore(row[0]);
+    const table = gpSec.tables[0];
+    const header = table[0] || [];
+    const iStore = colIndex(header, ["magasin"], 0);
+    const iMarge = colIndex(header, ["marge gp", "garantie"], 1);
+    const iTotal = colIndex(header, ["marge totale"], 2);
+    const iRatio = colIndex(header, ["ratio"], 3);
+    const iTrend = colIndex(header, ["tendance"], 4);
+    const iStatus = colIndex(header, ["statut"], 5);
+    for (const row of table.slice(1)) {
+      const store = matchStore(row[iStore]);
       if (!store) continue;
       gp[store] = {
-        margeGP: parseNum(row[1]),
-        margeTotal: parseNum(row[2]),
-        ratio: parseNum(row[3]),
-        trend: parseTrend(row[4]),
-        status: parseStatus(row[5]) || "bad",
+        margeGP: parseNum(row[iMarge]),
+        margeTotal: parseNum(row[iTotal]),
+        ratio: parseNum(row[iRatio]),
+        trend: parseTrend(row[iTrend]),
+        status: parseStatus(row[iStatus]) || "bad",
       };
     }
     for (const p of gpSec.paragraphs) {
@@ -200,14 +232,21 @@ function buildPage1(sections) {
   // Occasion
   const occSec = findSection(sections, "occasion");
   if (occSec?.tables[0]) {
-    for (const row of occSec.tables[0]) {
-      const store = matchStore(row[0]);
+    const table = occSec.tables[0];
+    const header = table[0] || [];
+    const iStore = colIndex(header, ["magasin"], 0);
+    const iVolume = colIndex(header, ["volume"], 1);
+    const iMarge = colIndex(header, ["marge"], 2);
+    const iObjectif = colIndex(header, ["objectif"], 3);
+    const iTrend = colIndex(header, ["tendance"], 5);
+    for (const row of table.slice(1)) {
+      const store = matchStore(row[iStore]);
       if (!store) continue;
       occasion[store] = {
-        volume: parseNum(row[1]),
-        marge: parseNum(row[2]),
-        objectif: parseNum(row[3]) || OCC_OBJ[store],
-        trend: parseTrend(row[5]),
+        volume: parseNum(row[iVolume]),
+        marge: parseNum(row[iMarge]),
+        objectif: parseNum(row[iObjectif]) || OCC_OBJ[store],
+        trend: parseTrend(row[iTrend]),
       };
     }
   }
@@ -216,15 +255,6 @@ function buildPage1(sections) {
 }
 
 // ─── PAGE 2 : Mobileo / ATM ─────────────────────────────────────────────────
-// Trouve l'index d'une colonne d'après des mots-clés dans la ligne d'en-tête
-function colIndex(header, ...keywords) {
-  for (let i = 0; i < header.length; i++) {
-    const h = (header[i] || "").toLowerCase();
-    if (keywords.some(k => h.includes(k.toLowerCase()))) return i;
-  }
-  return -1;
-}
-
 // Associe les commentaires (puces "Nom (Magasin — …)") à chaque magasin
 function analysisFromBullets(paragraphs) {
   const out = {};
@@ -247,10 +277,10 @@ function buildPage2(sections) {
   if (mobSec?.tables[0]) {
     const table = mobSec.tables[0];
     const header = table[0] || [];
-    const iTotal = colIndex(header, "total");
-    const iTrend = colIndex(header, "tendance");
-    const iStatut = colIndex(header, "statut");
-    const iVendeur = colIndex(header, "vendeur");
+    const iTotal = colIndex(header, ["total"]);
+    const iTrend = colIndex(header, ["tendance"]);
+    const iStatut = colIndex(header, ["statut"]);
+    const iVendeur = colIndex(header, ["vendeur"]);
 
     for (let r = 1; r < table.length; r++) {
       const row = table[r];
@@ -290,11 +320,11 @@ function buildPage2(sections) {
   if (atmSec?.tables[0]) {
     const table = atmSec.tables[0];
     const header = table[0] || [];
-    const iAtm = colIndex(header, "total atm", "atm vendus", "atm");
-    const iOcc = colIndex(header, "occ");
-    const iRatio = colIndex(header, "ratio");
-    const iTrend = colIndex(header, "tendance");
-    const iStatut = colIndex(header, "statut");
+    const iAtm = colIndex(header, ["total atm", "atm vendus", "atm"]);
+    const iOcc = colIndex(header, ["occ"]);
+    const iRatio = colIndex(header, ["ratio"]);
+    const iTrend = colIndex(header, ["tendance"]);
+    const iStatut = colIndex(header, ["statut"]);
 
     for (let r = 1; r < table.length; r++) {
       const row = table[r];
@@ -321,14 +351,22 @@ const STORE_STAFF_SOLO = { "Chalon-sur-Saône": 1, "Besançon": 1 };
 // ─── Extrait la période depuis le 1er titre "Période : ..." ─────────────────
 function extractPeriod(sections) {
   for (const s of sections) {
-    const m = s.heading.match(/Période\s*:\s*([^—\n]+?)(?:\s*—\s*à date du\s*(.+))?$/i);
-    if (m) return { period: m[1].trim(), updated: (m[2] || "").trim() };
+    const m = s.heading.match(
+      /Période\s*:\s*([^—\n]+?)(?:\s*—\s*(?:cumul\s+au|à date du)\s*(\d{1,2}\/\d{1,2}\/\d{4})(?:\s*\(\s*(\d+)\s*\/\s*(\d+)\s*jours?\s+ouvrés?\s*\))?)?$/i
+    );
+    if (m) {
+      return {
+        period: m[1].trim(),
+        updated: (m[2] || "").trim(),
+        workdays: m[3] && m[4] ? { elapsed: Number(m[3]), total: Number(m[4]) } : null,
+      };
+    }
     for (const p of s.paragraphs) {
       const pm = p.match(/Période\s*:\s*([^—\n]+)/i);
-      if (pm) return { period: pm[1].trim(), updated: "" };
+      if (pm) return { period: pm[1].trim(), updated: "", workdays: null };
     }
   }
-  return { period: "", updated: "" };
+  return { period: "", updated: "", workdays: null };
 }
 
 // ─── Extrait la phrase de synthèse RZ (fait marquant / ce que je retiens) ────
@@ -388,6 +426,7 @@ export async function fetchResultsData() {
   return {
     period: meta.period || "Mois en cours",
     updated: meta.updated || new Date().toLocaleDateString("fr-FR"),
+    workdays: meta.workdays,
     syntheseRZ,
     faitsMarquants,
     page1,
@@ -565,11 +604,7 @@ function groupGoatByPeriod(rows) {
   return Object.values(byLabel).sort((a, b) => (b.start || "").localeCompare(a.start || ""));
 }
 
-export async function fetchGoatData() {
-  const dsId = process.env.NOTION_GOAT_DB_ID;
-  if (!dsId) return { weekly: null, monthly: null, titlesHistory: [] };
-
-  const pages = await queryCollection(dsId);
+function buildGoatData(pages) {
   const rows = pages.map(parseGoatRow).filter(r => r.name && r.periodType);
 
   const weeklyRows = rows.filter(r => r.periodType === "Semaine");
@@ -605,6 +640,12 @@ export async function fetchGoatData() {
   return { weekly, monthly, titlesHistory };
 }
 
+export async function fetchGoatData() {
+  const dsId = process.env.NOTION_GOAT_DB_ID;
+  if (!dsId) return { weekly: null, monthly: null, titlesHistory: [] };
+  return buildGoatData(await queryCollection(dsId));
+}
+
 // ─── VENDEURS : cumul du mois en cours ──────────────────────────────────────
 // Aucune ligne "Mois" n'existe tant que le mois n'est pas terminé : on agrège
 // donc les lignes "Jour" du mois courant. Bonus : le résultat est à jour au
@@ -624,12 +665,8 @@ function moisCourantISO(ref = new Date()) {
   return { debut: `${y}-${m}-01`, cle: `${y}-${m}` };
 }
 
-export async function fetchVendorsMTD() {
-  const dsId = process.env.NOTION_GOAT_DB_ID;
-  if (!dsId) return { periode: null, vendors: [] };
-
+function buildVendorsMTD(pages) {
   const { debut, cle } = moisCourantISO();
-  const pages = await queryCollection(dsId);
 
   const agg = {};
   for (const page of pages) {
@@ -673,6 +710,27 @@ export async function fetchVendorsMTD() {
   })).sort((a, b) => b.margeTotale - a.margeTotale);
 
   return { periode: cle, vendors };
+}
+
+export async function fetchVendorsMTD() {
+  const dsId = process.env.NOTION_GOAT_DB_ID;
+  if (!dsId) return { periode: null, vendors: [] };
+  return buildVendorsMTD(await queryCollection(dsId));
+}
+
+// Le classement GOAT et le cumul vendeurs reposent sur la même base. Cette
+// fonction permet au serveur de ne lire la collection qu'une seule fois lors
+// d'un chargement ou d'une actualisation.
+export async function fetchGoatBundle() {
+  const dsId = process.env.NOTION_GOAT_DB_ID;
+  if (!dsId) {
+    return {
+      goat: { weekly: null, monthly: null, titlesHistory: [] },
+      vendors: { periode: null, vendors: [] },
+    };
+  }
+  const pages = await queryCollection(dsId);
+  return { goat: buildGoatData(pages), vendors: buildVendorsMTD(pages) };
 }
 
 // ─── PLANS D'ACTION MAGASINS ────────────────────────────────────────────────
