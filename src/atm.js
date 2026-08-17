@@ -17,7 +17,7 @@ const NOTION_API = "https://api.notion.com/v1";
 const NOTION_VERSION = "2025-09-03"; // ⚠︎ si notion.js utilise 2022-06-28, aligner ici
 const DS = () => process.env.NOTION_ATM_DB_ID;
 
-const STATUTS_OUVERTS = [
+export const STATUTS_OUVERTS = [
   "En expertise",
   "En attente accord",
   "En réparation",
@@ -25,7 +25,7 @@ const STATUTS_OUVERTS = [
   "Renvoyé ATM",
 ];
 
-const ETAPES = [
+export const ETAPES = [
   "1 - Réception",
   "2 - Cohérence",
   "3 - Expertise et devis",
@@ -36,7 +36,7 @@ const ETAPES = [
   "8 - Retour et remise",
 ];
 
-const MAGASINS = [
+export const MAGASINS = [
   "Pontarlier",
   "Lons-le-Saunier",
   "Dijon",
@@ -117,7 +117,7 @@ function mapDossier(page) {
  * répare ET ceux dont il est le magasin d'accueil (le client peut être passé
  * par un Darty rattaché, mais c'est bien lui qui rendra l'appareil).
  */
-async function fetchDossiers({ store } = {}) {
+export async function fetchDossiers({ store } = {}) {
   if (!DS()) return { dossiers: [], configured: false };
 
   const filter = {
@@ -149,7 +149,7 @@ async function fetchDossiers({ store } = {}) {
 }
 
 /** Un dossier précis, avec contrôle d'accès. */
-async function fetchDossier(pageId, { store } = {}) {
+export async function fetchDossier(pageId, { store } = {}) {
   const d = mapDossier(await notion(`/pages/${pageId}`));
   if (store && d.magasinReparateur !== store && d.magasinAccueil !== store) {
     const err = new Error("Ce dossier n'appartient pas à votre magasin.");
@@ -175,7 +175,7 @@ function valide(b) {
 }
 
 /** Ouverture d'un dossier. Le magasin réparateur est imposé pour un compte magasin. */
-async function createDossier(body, { store } = {}) {
+export async function createDossier(body, { store } = {}) {
   const b = { ...body };
   if (store) b.magasinReparateur = store;
 
@@ -221,7 +221,7 @@ function statutDepuisEtape(etapeIdx, branch) {
 }
 
 /** Avancement : progression, dates clés, montant, remarque. */
-async function updateDossier(pageId, body, { store } = {}) {
+export async function updateDossier(pageId, body, { store } = {}) {
   const actuel = await fetchDossier(pageId, { store });
   if (actuel.statut === "Clôturé") {
     const err = new Error("Ce dossier est clôturé, il n'est plus modifiable.");
@@ -254,7 +254,7 @@ async function updateDossier(pageId, body, { store } = {}) {
  * en cours » et bascule dans « Archives clôturées », avec la date de remise.
  * L'attestation de remise peut être réclamée par l'assureur des mois après.
  */
-async function clotureDossier(pageId, body = {}, { store } = {}) {
+export async function clotureDossier(pageId, body = {}, { store } = {}) {
   await fetchDossier(pageId, { store });
   return mapDossier(
     await notion(`/pages/${pageId}`, "PATCH", {
@@ -272,7 +272,7 @@ async function clotureDossier(pageId, body = {}, { store } = {}) {
 // ─── indicateurs pour l'accueil ──────────────────────────────────────────────
 
 /** Alimente le bloc « À reprendre » et les compteurs des tuiles. */
-function indicateurs(dossiers, aujourdhui = new Date()) {
+export function indicateurs(dossiers, aujourdhui = new Date()) {
   const jours = (d) =>
     d ? Math.round((aujourdhui - new Date(d)) / 86400000) : null;
 
@@ -294,15 +294,3 @@ function indicateurs(dossiers, aujourdhui = new Date()) {
     })),
   };
 }
-
-module.exports = {
-  fetchDossiers,
-  fetchDossier,
-  createDossier,
-  updateDossier,
-  clotureDossier,
-  indicateurs,
-  ETAPES,
-  MAGASINS,
-  STATUTS_OUVERTS,
-};
