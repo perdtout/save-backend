@@ -3,7 +3,7 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
-import { fetchResultsData, fetchVisits, fetchHistory, fetchGoatBundle, fetchActions } from "./notion.js";
+import { fetchResultsData, fetchVisits, fetchHistory, fetchGoatBundle, fetchActions, fetchProcess } from "./notion.js";
 import { login, requireAuth, filterForUser } from "./auth.js";
 
 const app = express();
@@ -18,6 +18,7 @@ const cache = {
   history: { data: null, ts: 0 },
   goatBundle: { data: null, ts: 0 },
   actions: { data: null, ts: 0 },
+  process: { data: null, ts: 0 },
 };
 let goatBundleRequest = null;
 
@@ -69,6 +70,14 @@ async function getActions(force = false) {
   return data;
 }
 
+async function getProcess(force = false) {
+  const now = Date.now();
+  if (!force && cache.process.data && now - cache.process.ts < CACHE_TTL) return cache.process.data;
+  const data = await fetchProcess();
+  cache.process = { data, ts: now };
+  return data;
+}
+
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
 // Santé + diagnostic de configuration
@@ -85,6 +94,7 @@ app.get("/api/health", (req, res) => res.json({
     historyDb:    !!process.env.NOTION_HISTORY_DB_ID,
     goatDb:       !!process.env.NOTION_GOAT_DB_ID,
     actionsDb:    !!process.env.NOTION_ACTIONS_DB_ID,
+    processDb:    !!process.env.NOTION_PROCESS_DB_ID,
   },
 }));
 
@@ -214,6 +224,21 @@ app.get("/api/actions", requireAuth, async (req, res) => {
   }
 });
 
+// Bibliothèque des process
+// Les magasins ne voient que les process publiés ; le RZ voit tout, avec l'état
+// de publication, pour pouvoir vérifier ce que ses équipes ont sous les yeux.
+app.get("/api/process", requireAuth, async (req, res) => {
+  try {
+    const force = req.query.refresh === "1" && req.user.role === "rz";
+    let items = await getProcess(force);
+    if (req.user.role !== "rz") items = items.filter(p => p.published);
+    res.json({ process: items });
+  } catch (e) {
+    console.error("Erreur /api/process:", e.message);
+    res.status(502).json({ error: "Lecture Notion impossible", detail: e.message });
+  }
+});
+
 // Vide le cache (RZ uniquement)
 app.post("/api/refresh", requireAuth, async (req, res) => {
   if (req.user.role !== "rz") return res.status(403).json({ error: "Réservé au RZ" });
@@ -222,6 +247,7 @@ app.post("/api/refresh", requireAuth, async (req, res) => {
   cache.history = { data: null, ts: 0 };
   cache.goatBundle = { data: null, ts: 0 };
   cache.actions = { data: null, ts: 0 };
+  cache.process = { data: null, ts: 0 };
   res.json({ ok: true, message: "Cache vidé. Prochaine requête relit Notion." });
 });
 

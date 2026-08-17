@@ -765,3 +765,45 @@ export async function fetchActions() {
     (ORDRE[a.state] ?? 0) - (ORDRE[b.state] ?? 0) ||
     (a.due || "9999").localeCompare(b.due || "9999"));
 }
+
+
+// ─── PROCESS — bibliothèque des process de la zone ───────────────────────────
+// Base Notion « 📁 Process — Zone SAVE ». Les fichiers restent dans le Drive :
+// cette base ne porte que les métadonnées et décide de ce qui s'affiche.
+// Une ligne non publiée reste invisible côté magasin.
+export async function fetchProcess() {
+  const dsId = process.env.NOTION_PROCESS_DB_ID;
+  if (!dsId) return [];
+
+  const pages = await queryCollection(dsId);
+  const ORDRE_THEME = {
+    "Réparation & atelier": 0,
+    "Occasion & reprise": 1,
+    "Brokers": 2,
+    "Ventes & partenaires": 3,
+    "SAV & administratif": 4,
+  };
+
+  return pages.map(page => {
+    const pr = page.properties;
+    return {
+      id: page.id,
+      title: richText(Object.values(pr).find(p => p.type === "title")?.title || []),
+      theme: pr["Thème"]?.select?.name || "Autres",
+      url: pr["Lien Drive"]?.url || "",
+      format: pr["Format"]?.select?.name || "PDF",
+      // Date lue dans le document lui-même, pas la date de modification Drive.
+      updated: pr["Date MAJ"]?.date?.start || "",
+      state: pr["État"]?.select?.name || "",
+      audience: pr["Pour qui"]?.select?.name || "Tous",
+      published: !!pr["Publié"]?.checkbox,
+      note: richText(pr["Remarque"]?.rich_text || []),
+      notionUrl: page.url,
+    };
+  })
+  .filter(p => p.title)
+  .sort((a, b) =>
+    (ORDRE_THEME[a.theme] ?? 9) - (ORDRE_THEME[b.theme] ?? 9) ||
+    (b.updated || "").localeCompare(a.updated || "") ||
+    a.title.localeCompare(b.title, "fr"));
+}
