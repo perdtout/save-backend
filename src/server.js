@@ -5,6 +5,7 @@ import express from "express";
 import cors from "cors";
 import { fetchResultsData, fetchVisits, fetchHistory, fetchGoatBundle, fetchActions, fetchProcess } from "./notion.js";
 import { login, requireAuth, filterForUser } from "./auth.js";
+import { fetchDossiers, createDossier, updateDossier, clotureDossier, indicateurs } from "./atm.js";
 
 const app = express();
 app.use(cors({ origin: process.env.CORS_ORIGIN || "*" }));
@@ -20,6 +21,9 @@ const cache = {
   actions: { data: null, ts: 0 },
   process: { data: null, ts: 0 },
 };
+// Les dossiers ATM sont filtrés par magasin : une entrée de cache par magasin,
+// plus une entrée "zone" pour le responsable de zone.
+const atmCache = {};
 let goatBundleRequest = null;
 
 async function getResults(force = false) {
@@ -78,7 +82,25 @@ async function getProcess(force = false) {
   return data;
 }
 
-// ─── Routes ──────────────────────────────────────────────────────────────────
+async function getAtm(store, force = false) {
+  const key = store || "zone";
+  const now = Date.now();
+  const hit = atmCache[key];
+  if (!force && hit?.data && now - hit.ts < CACHE_TTL) return hit.data;
+  const { dossiers, configured } = await fetchDossiers({ store });
+  const data = { configured, dossiers, indicateurs: indicateurs(dossiers) };
+  atmCache[key] = { data, ts: now };
+  return data;
+}
+
+// Sans ça, le technicien coche une case et son écran ne bouge pas pendant cinq
+// minutes. On vide toutes les entrées : un dossier compte dans la liste de son
+// magasin et dans celle de la zone.
+function invalidateAtm() {
+  for (const k of Object.keys(atmCache)) delete atmCache[k];
+}
+
+// ─── Routes ─────────────────────────────────────────────────────────────────
 
 // Santé + diagnostic de configuration
 // Ne renvoie jamais de valeur secrète : uniquement la présence ou l'absence de
@@ -95,6 +117,7 @@ app.get("/api/health", (req, res) => res.json({
     goatDb:       !!process.env.NOTION_GOAT_DB_ID,
     actionsDb:    !!process.env.NOTION_ACTIONS_DB_ID,
     processDb:    !!process.env.NOTION_PROCESS_DB_ID,
+    atmDb:        !!process.env.NOTION_ATM_DB_ID,
   },
 }));
 
@@ -239,6 +262,58 @@ app.get("/api/process", requireAuth, async (req, res) => {
   }
 });
 
+// ─── Dossiers ATM ────────────────────────────────────────────────────────────
+// Premières routes d'écriture de l'app. Le magasin d'un compte n'est jamais lu
+// depuis le corps de la requête : il vient du jeton, et atm.js le revérifie.
+
+app.get("/api/atm", requireAuth, async (req, res) => {
+  try {
+    const store = req.user.role === "rz" ? null : req.user.store;
+    const force = req.query.refresh === "1";
+    res.json(await getAtm(store, force));
+  } catch (e) {
+    console.error("Erreur /api/atm:", e.message);
+    res.status(502).json({ error: "Lecture Notion impossible", detail: e.message });
+  }
+});
+
+app.post("/api/atm", requireAuth, async (req, res) => {
+  try {
+    const store = req.user.role === "rz" ? null : req.user.store;
+    const dossier = await createDossier(req.body, { store });
+    invalidateAtm();
+    res.status(201).json(dossier);
+  } catch (e) {
+    console.error("Erreur POST /api/atm:", e.message);
+    res.status(e.status || 502).json({ error: e.message });
+  }
+});
+
+app.patch("/api/atm/:id", requireAuth, async (req, res) => {
+  try {
+    const store = req.user.role === "rz" ? null : req.user.store;
+    const dossier = await updateDossier(req.params.id, req.body, { store });
+    invalidateAtm();
+    res.json(dossier);
+  } catch (e) {
+    console.error("Erreur PATCH /api/atm:", e.message);
+    res.status(e.status || 502).json({ error: e.message });
+  }
+});
+
+// Clôture = archivage. La ligne reste dans Notion avec sa date de remise.
+app.post("/api/atm/:id/cloture", requireAuth, async (req, res) => {
+  try {
+    const store = req.user.role === "rz" ? null : req.user.store;
+    const dossier = await clotureDossier(req.params.id, req.body, { store });
+    invalidateAtm();
+    res.json(dossier);
+  } catch (e) {
+    console.error("Erreur clôture /api/atm:", e.message);
+    res.status(e.status || 502).json({ error: e.message });
+  }
+});
+
 // Vide le cache (RZ uniquement)
 app.post("/api/refresh", requireAuth, async (req, res) => {
   if (req.user.role !== "rz") return res.status(403).json({ error: "Réservé au RZ" });
@@ -248,6 +323,7 @@ app.post("/api/refresh", requireAuth, async (req, res) => {
   cache.goatBundle = { data: null, ts: 0 };
   cache.actions = { data: null, ts: 0 };
   cache.process = { data: null, ts: 0 };
+  invalidateAtm();
   res.json({ ok: true, message: "Cache vidé. Prochaine requête relit Notion." });
 });
 
@@ -256,4 +332,5 @@ app.listen(PORT, () => {
   console.log(`✅ API SAVE Pilotage en écoute sur http://localhost:${PORT}`);
   console.log(`   Pages Notion : P1=${process.env.NOTION_PAGE1_ID?.slice(0,8)}… P2=${process.env.NOTION_PAGE2_ID?.slice(0,8)}…`);
   console.log(`   GOAT DB : ${process.env.NOTION_GOAT_DB_ID?.slice(0,8)}…`);
+  console.log(`   ATM DB  : ${process.env.NOTION_ATM_DB_ID?.slice(0,8) || "non configuree"}…`);
 });
