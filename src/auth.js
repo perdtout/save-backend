@@ -70,7 +70,8 @@ export function login(username, password) {
     console.error(`Connexion refusée pour "${key}" : ${account.env} absent des variables d'environnement.`);
     return null;
   }
-  if (!bcrypt.compareSync(password || "", hash)) return null;
+    const ok = hash.startsWith("$2") ? bcrypt.compareSync(password || "", hash) : (password || "") === hash;
+  if (!ok) return null;
 
   const payload = {
     sub: key,
