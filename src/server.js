@@ -11,6 +11,72 @@ const app = express();
 app.use(cors({ origin: process.env.CORS_ORIGIN || "*" }));
 app.use(express.json());
 
+// ─── Alternance ───────────────────────────────────────────────────────────
+import { requireStoreData } from "./auth.js";
+import { fetchBundle, createHebdo, updateHebdo, updateJalon, validerJalon } from "./alternance.js";
+// Un compte alternant n'accede aux ecrans commerciaux qu'a partir de la date
+// portee par son compte. Monte ici, avant les routes concernees : Express
+// applique les middlewares dans l'ordre d'enregistrement.
+app.use(["/api/results", "/api/visits", "/api/history", "/api/goat", "/api/vendors", "/api/actions", "/api/atm"], requireAuth, requireStoreData);
+// Le contenu depend du role : le tuteur voit les commentaires, l'alternante non.
+// Une entree de cache par utilisateur, sinon on sert a l'une ce qui est destine a l'autre.
+const altCache = {};
+async function getAlternance(user, force = false) {
+  const now = Date.now();
+  const hit = altCache[user.sub];
+  if (!force && hit && now - hit.ts < CACHE_TTL) return hit.data;
+  const data = await fetchBundle(user);
+  altCache[user.sub] = { data, ts: now };
+  return data;
+}
+function invalidateAlternance() {
+  for (const k of Object.keys(altCache)) delete altCache[k];
+}
+app.get("/api/alternance", requireAuth, async (req, res) => {
+  try {
+    res.json(await getAlternance(req.user, req.query.refresh === "1"));
+  } catch (e) {
+    console.error("Erreur /api/alternance:", e.message);
+    res.status(502).json({ error: "Lecture Notion impossible", detail: e.message });
+  }
+});
+app.post("/api/alternance/hebdo", requireAuth, async (req, res) => {
+  try {
+    const ligne = await createHebdo(req.body, req.user);
+    invalidateAlternance();
+    res.status(201).json(ligne);
+  } catch (e) {
+    res.status(e.status || 502).json({ error: e.message });
+  }
+});
+app.patch("/api/alternance/hebdo/:id", requireAuth, async (req, res) => {
+  try {
+    const ligne = await updateHebdo(req.params.id, req.body, req.user);
+    invalidateAlternance();
+    res.json(ligne);
+  } catch (e) {
+    res.status(e.status || 502).json({ error: e.message });
+  }
+});
+app.patch("/api/alternance/jalon/:id", requireAuth, async (req, res) => {
+  try {
+    const etape = await updateJalon(req.params.id, req.body, req.user);
+    invalidateAlternance();
+    res.json(etape);
+  } catch (e) {
+    res.status(e.status || 502).json({ error: e.message });
+  }
+});
+app.patch("/api/alternance/jalon/:id/valider", requireAuth, async (req, res) => {
+  try {
+    const etape = await validerJalon(req.params.id, req.body, req.user);
+    invalidateAlternance();
+    res.json(etape);
+  } catch (e) {
+    res.status(e.status || 502).json({ error: e.message });
+  }
+});
+
 // ─── Cache mémoire simple ────────────────────────────────────────────────────
 const CACHE_TTL = (parseInt(process.env.CACHE_TTL) || 300) * 1000;
 const cache = {
@@ -324,6 +390,7 @@ app.post("/api/refresh", requireAuth, async (req, res) => {
   cache.actions = { data: null, ts: 0 };
   cache.process = { data: null, ts: 0 };
   invalidateAtm();
+  invalidateAlternance();
   res.json({ ok: true, message: "Cache vidé. Prochaine requête relit Notion." });
 });
 
