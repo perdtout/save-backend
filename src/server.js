@@ -184,6 +184,9 @@ app.get("/api/health", (req, res) => res.json({
     actionsDb:    !!process.env.NOTION_ACTIONS_DB_ID,
     processDb:    !!process.env.NOTION_PROCESS_DB_ID,
     atmDb:        !!process.env.NOTION_ATM_DB_ID,
+    altAlternantsDb: !!process.env.NOTION_ALT_ALTERNANTS_ID,
+    altParcoursDb: !!process.env.NOTION_ALT_PARCOURS_ID,
+    altHebdoDb: !!process.env.NOTION_ALT_HEBDO_ID,
   },
 }));
 
