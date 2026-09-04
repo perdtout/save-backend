@@ -52,6 +52,25 @@ export const ACCOUNTS = {
     // Avant cette date, elle ne voit ni le GOAT, ni les résultats du magasin,
     // ni les commentaires. Elle voit son parcours et ses propres compteurs.
     storeDataFrom: "2027-03-01",
+  }, 
+  mathis: {
+    role: "store",
+    store: "Pontarlier",
+    name: "Mathis",
+    env: "PWD_MATHIS",
+    // Désigne l'alternant dont il est le maître d'apprentissage. C'est ce
+    // champ, et lui seul, qui ouvre le droit d'écriture sur son suivi.
+    tutorOf: "Leny Stortz",
+  },
+  leny: {
+    role: "apprentice",
+    store: "Pontarlier",
+    name: "Leny Stortz",
+    env: "PWD_LENY",
+    // Date provisoire, à revoir selon son rythme réel (pas de jalon figé
+    // comme pour Maëlle). Avant cette date, il ne voit ni le GOAT, ni les
+    // résultats du magasin, ni les commentaires.
+    storeDataFrom: "2027-03-01",
   },
 };
 
