@@ -3,7 +3,8 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
-import { fetchResultsData, fetchVisits, fetchHistory, fetchGoatBundle, fetchActions, fetchProcess } from "./notion.js";
+import { fetchVisits } from "./notion.js";
+import { fetchResultsData, fetchHistory, fetchGoatBundle, fetchActions, fetchProcess } from "./sheets.js";
 import { login, requireAuth, filterForUser } from "./auth.js";
 import { fetchDossiers, createDossier, updateDossier, clotureDossier, indicateurs } from "./atm.js";
 
@@ -175,18 +176,21 @@ app.get("/api/health", (req, res) => res.json({
   ok: true,
   service: "SAVE Pilotage API",
   config: {
+    // Notion : reste utilisé pour les visites, les dossiers ATM et l'alternance.
     notionToken:  !!process.env.NOTION_TOKEN,
-    page1:        !!process.env.NOTION_PAGE1_ID,
-    page2:        !!process.env.NOTION_PAGE2_ID,
     visitsDb:     !!process.env.NOTION_VISITS_DB_ID,
-    historyDb:    !!process.env.NOTION_HISTORY_DB_ID,
-    goatDb:       !!process.env.NOTION_GOAT_DB_ID,
-    actionsDb:    !!process.env.NOTION_ACTIONS_DB_ID,
-    processDb:    !!process.env.NOTION_PROCESS_DB_ID,
     atmDb:        !!process.env.NOTION_ATM_DB_ID,
     altAlternantsDb: !!process.env.NOTION_ALT_ALTERNANTS_ID,
     altParcoursDb: !!process.env.NOTION_ALT_PARCOURS_ID,
     altHebdoDb: !!process.env.NOTION_ALT_HEBDO_ID,
+    // Google Sheets : résultats (Pages 1/2), GOAT/vendeurs, historique, actions, process.
+    googleServiceAccount: !!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && !!process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,
+    sheetPage1:   !!process.env.GOOGLE_SHEET_PAGE1_ID,
+    sheetPage2:   !!process.env.GOOGLE_SHEET_PAGE2_ID,
+    sheetGoat:    !!process.env.GOOGLE_SHEET_GOAT_ID,
+    sheetHistory: !!process.env.GOOGLE_SHEET_HISTORY_ID,
+    sheetActions: !!process.env.GOOGLE_SHEET_ACTIONS_ID,
+    sheetProcess: !!process.env.GOOGLE_SHEET_PROCESS_ID,
   },
 }));
 
@@ -195,24 +199,24 @@ app.get("/api/health", (req, res) => res.json({
 // avec l'intégration, ou base simplement vide.
 app.get("/api/actions/debug", requireAuth, async (req, res) => {
   if (req.user.role !== "rz") return res.status(403).json({ error: "Réservé au RZ" });
-  if (!process.env.NOTION_ACTIONS_DB_ID) {
-    return res.json({ ok: false, cause: "NOTION_ACTIONS_DB_ID absent des variables d'environnement" });
+  if (!process.env.GOOGLE_SHEET_ACTIONS_ID) {
+    return res.json({ ok: false, cause: "GOOGLE_SHEET_ACTIONS_ID absent des variables d'environnement" });
   }
   try {
     const actions = await fetchActions();
     res.json({
       ok: true,
-      id: process.env.NOTION_ACTIONS_DB_ID,
+      id: process.env.GOOGLE_SHEET_ACTIONS_ID,
       total: actions.length,
       publiees: actions.filter(a => a.published).length,
       parMagasin: actions.reduce((acc, a) => ({ ...acc, [a.store]: (acc[a.store] || 0) + 1 }), {}),
-      cause: actions.length ? null : "Base lue mais vide, ou lignes sans titre/magasin",
+      cause: actions.length ? null : "Feuille lue mais vide, ou lignes sans titre/magasin",
     });
   } catch (e) {
     res.status(502).json({
       ok: false,
-      id: process.env.NOTION_ACTIONS_DB_ID,
-      cause: "Lecture Notion refusée — l'intégration n'a probablement pas accès à la base, ou l'identifiant n'est pas le bon",
+      id: process.env.GOOGLE_SHEET_ACTIONS_ID,
+      cause: "Lecture Google Sheets refusée — le fichier n'est probablement pas partagé avec le compte de service, ou l'identifiant n'est pas le bon",
       detail: e.message,
     });
   }
@@ -400,7 +404,7 @@ app.post("/api/refresh", requireAuth, async (req, res) => {
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`✅ API SAVE Pilotage en écoute sur http://localhost:${PORT}`);
-  console.log(`   Pages Notion : P1=${process.env.NOTION_PAGE1_ID?.slice(0,8)}… P2=${process.env.NOTION_PAGE2_ID?.slice(0,8)}…`);
-  console.log(`   GOAT DB : ${process.env.NOTION_GOAT_DB_ID?.slice(0,8)}…`);
-  console.log(`   ATM DB  : ${process.env.NOTION_ATM_DB_ID?.slice(0,8) || "non configuree"}…`);
+  console.log(`   Sheets : Page1=${process.env.GOOGLE_SHEET_PAGE1_ID?.slice(0,8)}… Page2=${process.env.GOOGLE_SHEET_PAGE2_ID?.slice(0,8)}…`);
+  console.log(`   GOAT Sheet : ${process.env.GOOGLE_SHEET_GOAT_ID?.slice(0,8)}…`);
+  console.log(`   ATM DB (Notion) : ${process.env.NOTION_ATM_DB_ID?.slice(0,8) || "non configuree"}…`);
 });
