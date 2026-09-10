@@ -302,8 +302,8 @@ return { mobileo, atm, analysis };
 
 // ─── API publique : résultats (Pages 1 + 2) ─────────────────────────────────
 export async function fetchResultsData() {
-const page1Id = process.env.GOOGLE_SHEET_PAGE1_ID;
-const page2Id = process.env.GOOGLE_SHEET_PAGE2_ID;
+const page1Id = process.env.GOOGLE_SHEET_MAIN_ID;
+const page2Id = process.env.GOOGLE_SHEET_MAIN_ID;
 
 const [rows1, rows2] = await Promise.all([
 readRange(page1Id, "Page1_Ratios!A1:R300"),
