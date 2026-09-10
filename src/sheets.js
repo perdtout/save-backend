@@ -306,8 +306,8 @@ const page1Id = process.env.GOOGLE_SHEET_PAGE1_ID;
 const page2Id = process.env.GOOGLE_SHEET_PAGE2_ID;
 
 const [rows1, rows2] = await Promise.all([
-readRange(page1Id, "A1:R300"),
-readRange(page2Id, "A1:H300"),
+readRange(page1Id, "Page1_Ratios!A1:R300"),
+readRange(page2Id, "Page2_Mobileo_ATM!A1:H300"),
 ]);
 
 const meta = parsePeriodLine(rows1[1] && rows1[1][0]);
