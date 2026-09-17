@@ -185,6 +185,7 @@ app.get("/api/health", (req, res) => res.json({
     altHebdoDb: !!process.env.NOTION_ALT_HEBDO_ID,
     // Google Sheets : résultats (Pages 1/2), GOAT/vendeurs, historique, actions, process.
     googleServiceAccount: !!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && !!process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,
+    sheetMain:    !!process.env.GOOGLE_SHEET_MAIN_ID,
     sheetPage1:   !!process.env.GOOGLE_SHEET_PAGE1_ID,
     sheetPage2:   !!process.env.GOOGLE_SHEET_PAGE2_ID,
     sheetGoat:    !!process.env.GOOGLE_SHEET_GOAT_ID,
