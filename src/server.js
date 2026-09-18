@@ -183,11 +183,13 @@ app.get("/api/health", (req, res) => res.json({
     altAlternantsDb: !!process.env.NOTION_ALT_ALTERNANTS_ID,
     altParcoursDb: !!process.env.NOTION_ALT_PARCOURS_ID,
     altHebdoDb: !!process.env.NOTION_ALT_HEBDO_ID,
-    // Google Sheets : résultats (Pages 1/2), GOAT/vendeurs, historique, actions, process.
+    // Google Sheets : résultats magasins, GOAT/vendeurs, historique, actions, process.
+    // GOOGLE_SHEET_MAIN_ID / GOOGLE_SHEET_PAGE1_ID / GOOGLE_SHEET_PAGE2_ID retirés le
+    // 18/09/2026 (refonte suivi) : c'étaient des variables orphelines ou remplacées,
+    // dont la présence à `true` masquait le vrai point de lecture — cf. incident du
+    // 17/09/2026. Ne plus les recréer.
     googleServiceAccount: !!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && !!process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,
-    sheetMain:    !!process.env.GOOGLE_SHEET_MAIN_ID,
-    sheetPage1:   !!process.env.GOOGLE_SHEET_PAGE1_ID,
-    sheetPage2:   !!process.env.GOOGLE_SHEET_PAGE2_ID,
+    sheetMagasins: !!process.env.GOOGLE_SHEET_MAGASINS_ID,
     sheetGoat:    !!process.env.GOOGLE_SHEET_GOAT_ID,
     sheetHistory: !!process.env.GOOGLE_SHEET_HISTORY_ID,
     sheetActions: !!process.env.GOOGLE_SHEET_ACTIONS_ID,
@@ -405,7 +407,7 @@ app.post("/api/refresh", requireAuth, async (req, res) => {
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`✅ API SAVE Pilotage en écoute sur http://localhost:${PORT}`);
-  console.log(`   Sheets : Page1=${process.env.GOOGLE_SHEET_PAGE1_ID?.slice(0,8)}… Page2=${process.env.GOOGLE_SHEET_PAGE2_ID?.slice(0,8)}…`);
+  console.log(`   Sheets : Magasins=${process.env.GOOGLE_SHEET_MAGASINS_ID?.slice(0,8)}…`);
   console.log(`   GOAT Sheet : ${process.env.GOOGLE_SHEET_GOAT_ID?.slice(0,8)}…`);
   console.log(`   ATM DB (Notion) : ${process.env.NOTION_ATM_DB_ID?.slice(0,8) || "non configuree"}…`);
 });
