@@ -1,12 +1,13 @@
 {
   "name": "save-pilotage-backend",
   "version": "1.0.0",
-  "description": "API backend de pilotage du réseau SAVE — Juvi-Group. Lit les résultats (Pages 1/2, GOAT, historique, actions, process) depuis Google Sheets, et les visites/ATM/alternance depuis Notion.",
+  "description": "API backend de pilotage du réseau SAVE — Juvi-Group. Lit les résultats magasins, GOAT, historique, actions, process depuis Google Sheets, et les visites/ATM/alternance depuis Notion.",
   "type": "module",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "node --watch src/server.js"
+    "dev": "node --watch src/server.js",
+    "test": "node test/magasins.test.mjs"
   },
   "dependencies": {
     "@notionhq/client": "^2.2.15",
