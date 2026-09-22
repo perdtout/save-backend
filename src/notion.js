@@ -493,52 +493,6 @@ export async function fetchVisits() {
   }).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 }
 
-// ─── Historique mensuel : lit la base d'archivage ───────────────────────────
-// Base "Historique Mensuel SAVE". Chaque ligne = un magasin sur un mois donné.
-export async function fetchHistory() {
-  const dsId = process.env.NOTION_HISTORY_DB_ID;
-  if (!dsId) return { months: [], byStore: {} };
-
-  const all = await queryCollection(dsId);
-
-  const num = (p) => (p?.number ?? null);
-  const txt = (p) => richText(p?.rich_text || []);
-  const sel = (p) => p?.select?.name || "";
-
-  const rows = all.map(page => {
-    const pr = page.properties;
-    return {
-      mois: txt(pr["Mois"]),
-      magasin: sel(pr["Magasin"]),
-      accessoires: num(pr["Ratio Accessoires"]),
-      margeAccessoires: num(pr["Marge Accessoires"]),
-      gp: num(pr["Ratio GP"]),
-      margeGP: num(pr["Marge GP"]),
-      occasion: num(pr["Mobiles Occasion"]),
-      objectifOccasion: num(pr["Objectif Occasion"]),
-      mobileo: num(pr["Forfaits Mobileo"]),
-      atm: num(pr["Ratio ATM"]),
-      margeTotale: num(pr["Marge Totale"]),
-      synthese: txt(pr["Synthèse du mois"]),
-    };
-  }).filter(r => r.mois && r.magasin);
-
-  // Liste triée des mois présents
-  const months = [...new Set(rows.map(r => r.mois))].sort();
-
-  // Regroupé par magasin, chaque magasin -> liste de mois triés
-  const byStore = {};
-  for (const r of rows) {
-    if (!byStore[r.magasin]) byStore[r.magasin] = [];
-    byStore[r.magasin].push(r);
-  }
-  for (const s of Object.keys(byStore)) {
-    byStore[s].sort((a, b) => a.mois.localeCompare(b.mois));
-  }
-
-  return { months, byStore, rows };
-}
-
 // ─── GOAT : lit la base "🐐 GOAT — Performance Vendeurs" ────────────────────
 // Une ligne = un vendeur sur une période (Type période = "Semaine" ou "Mois").
 // Colonnes brutes : Vendeur (title), Magasin (select), Type période (select),

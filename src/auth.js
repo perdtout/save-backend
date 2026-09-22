@@ -119,7 +119,7 @@ export function requireAuth(req, res, next) {
 /**
  * Un compte alternant ne voit les données commerciales du magasin qu'à partir
  * de son entrée dans le GOAT. Avant, il n'a accès qu'à l'écran Alternance.
- * À poser sur /api/results, /api/goat, /api/vendors, /api/history, /api/visits,
+ * À poser sur /api/results, /api/goat, /api/vendors, /api/visits,
  * /api/actions et /api/atm.
  */
 export function requireStoreData(req, res, next) {

@@ -4,7 +4,7 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import { fetchVisits } from "./notion.js";
-import { fetchResultsData, fetchHistory, fetchGoatBundle, fetchActions, fetchProcess } from "./sheets.js";
+import { fetchResultsData, fetchGoatBundle, fetchActions, fetchProcess } from "./sheets.js";
 import { login, requireAuth, filterForUser } from "./auth.js";
 import { fetchDossiers, createDossier, updateDossier, clotureDossier, indicateurs } from "./atm.js";
 
@@ -18,7 +18,7 @@ import { fetchBundle, createHebdo, updateHebdo, updateJalon, validerJalon } from
 // Un compte alternant n'accede aux ecrans commerciaux qu'a partir de la date
 // portee par son compte. Monte ici, avant les routes concernees : Express
 // applique les middlewares dans l'ordre d'enregistrement.
-app.use(["/api/results", "/api/visits", "/api/history", "/api/goat", "/api/vendors", "/api/actions", "/api/atm"], requireAuth, requireStoreData);
+app.use(["/api/results", "/api/visits", "/api/goat", "/api/vendors", "/api/actions", "/api/atm"], requireAuth, requireStoreData);
 // Le contenu depend du role : le tuteur voit les commentaires, l'alternante non.
 // Une entree de cache par utilisateur, sinon on sert a l'une ce qui est destine a l'autre.
 const altCache = {};
@@ -83,7 +83,6 @@ const CACHE_TTL = (parseInt(process.env.CACHE_TTL) || 300) * 1000;
 const cache = {
   results: { data: null, ts: 0 },
   visits:  { data: null, ts: 0 },
-  history: { data: null, ts: 0 },
   goatBundle: { data: null, ts: 0 },
   actions: { data: null, ts: 0 },
   process: { data: null, ts: 0 },
@@ -106,14 +105,6 @@ async function getVisits(force = false) {
   if (!force && cache.visits.data && now - cache.visits.ts < CACHE_TTL) return cache.visits.data;
   const data = await fetchVisits();
   cache.visits = { data, ts: now };
-  return data;
-}
-
-async function getHistory(force = false) {
-  const now = Date.now();
-  if (!force && cache.history.data && now - cache.history.ts < CACHE_TTL) return cache.history.data;
-  const data = await fetchHistory();
-  cache.history = { data, ts: now };
   return data;
 }
 
@@ -191,7 +182,6 @@ app.get("/api/health", (req, res) => res.json({
     googleServiceAccount: !!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && !!process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,
     sheetMagasins: !!process.env.GOOGLE_SHEET_MAGASINS_ID,
     sheetGoat:    !!process.env.GOOGLE_SHEET_GOAT_ID,
-    sheetHistory: !!process.env.GOOGLE_SHEET_HISTORY_ID,
     sheetActions: !!process.env.GOOGLE_SHEET_ACTIONS_ID,
     sheetProcess: !!process.env.GOOGLE_SHEET_PROCESS_ID,
   },
@@ -256,23 +246,6 @@ app.get("/api/visits", requireAuth, async (req, res) => {
     res.json({ visits });
   } catch (e) {
     console.error("Erreur /api/visits:", e.message);
-    res.status(502).json({ error: "Lecture Notion impossible", detail: e.message });
-  }
-});
-
-// Historique mensuel
-app.get("/api/history", requireAuth, async (req, res) => {
-  try {
-    const force = req.query.refresh === "1" && req.user.role === "rz";
-    const data = await getHistory(force);
-    if (req.user.role !== "rz") {
-      const store = req.user.store;
-      const byStore = data.byStore[store] ? { [store]: data.byStore[store] } : {};
-      return res.json({ months: data.months, byStore });
-    }
-    res.json({ months: data.months, byStore: data.byStore });
-  } catch (e) {
-    console.error("Erreur /api/history:", e.message);
     res.status(502).json({ error: "Lecture Notion impossible", detail: e.message });
   }
 });
@@ -395,7 +368,6 @@ app.post("/api/refresh", requireAuth, async (req, res) => {
   if (req.user.role !== "rz") return res.status(403).json({ error: "Réservé au RZ" });
   cache.results = { data: null, ts: 0 };
   cache.visits  = { data: null, ts: 0 };
-  cache.history = { data: null, ts: 0 };
   cache.goatBundle = { data: null, ts: 0 };
   cache.actions = { data: null, ts: 0 };
   cache.process = { data: null, ts: 0 };

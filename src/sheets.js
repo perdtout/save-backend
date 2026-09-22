@@ -322,51 +322,6 @@ export async function fetchResultsData() {
   };
 }
 
-// ─── Historique mensuel ──────────────────────────────────────────────────────
-// Feuille "Historique_Mensuel" : une ligne = un magasin sur un mois donné.
-export async function fetchHistory() {
-const id = process.env.GOOGLE_SHEET_HISTORY_ID;
-if (!id) return { months: [], byStore: {} };
-
-const rows = await readRange(id, "A1:L3000");
-if (!rows.length) return { months: [], byStore: {} };
-
-const idx = headerIndex(rows[0]);
-const iMois = idx("Mois"), iMag = idx("Magasin"), iAcc = idx("Ratio Accessoires (%)"),
-iMargeAcc = idx("Marge Accessoires (€)"), iGP = idx("Ratio GP (%)"),
-iMargeGP = idx("Marge GP (€)"), iOcc = idx("Mobiles Occasion"),
-iObjOcc = idx("Objectif Occasion"), iMobileo = idx("Forfaits Mobileo"),
-iAtm = idx("Ratio ATM (%)"), iMargeTotale = idx("Marge Totale (€)"),
-iSynth = idx("Synthèse du mois");
-
-const rowsData = rows.slice(1)
-.filter(r => !isBlankRow(r) && r[iMois] && r[iMag])
-.map(r => ({
-mois: str(r[iMois]),
-magasin: str(r[iMag]),
-accessoires: parseNum(r[iAcc]),
-margeAccessoires: parseNum(r[iMargeAcc]),
-gp: parseNum(r[iGP]),
-margeGP: parseNum(r[iMargeGP]),
-occasion: parseNum(r[iOcc]),
-objectifOccasion: parseNum(r[iObjOcc]),
-mobileo: parseNum(r[iMobileo]),
-atm: parseNum(r[iAtm]),
-margeTotale: parseNum(r[iMargeTotale]),
-synthese: str(r[iSynth]),
-}));
-
-const months = [...new Set(rowsData.map(r => r.mois))].sort();
-const byStore = {};
-for (const r of rowsData) {
-if (!byStore[r.magasin]) byStore[r.magasin] = [];
-byStore[r.magasin].push(r);
-}
-for (const s of Object.keys(byStore)) byStore[s].sort((a, b) => a.mois.localeCompare(b.mois));
-
-return { months, byStore, rows: rowsData };
-}
-
 // ─── GOAT + cumul vendeurs (source unique : Pilotage_SAVE_GOAT) ────────────
 // Colonnes : Date | Type période | Période | Vendeur | Magasin | Marge Totale (€) |
 // Marge Accessoires (€) | Marge GP (€) | Ratio Accessoires (%) | Ratio GP (%) |
