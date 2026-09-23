@@ -112,6 +112,29 @@ if (/^\d{4,6}$/.test(s)) return serialToISO(Number(s));
 return s;
 };
 
+const MOIS_FR = ["janvier", "février", "mars", "avril", "mai", "juin",
+"juillet", "août", "septembre", "octobre", "novembre", "décembre"];
+
+// Libellé de période (colonne "Période" du classeur GOAT) — protège contre le
+// bug récurrent des "dates déguisées" : sur ce classeur en locale française,
+// une cellule texte tapée comme une date (ex. "01.08.2026" pour "Août 2026")
+// est silencieusement réinterprétée par Sheets et stockée comme un numéro de
+// série (ex. 46235) au lieu du texte voulu. Plutôt que d'afficher ce numéro
+// brut au responsable de zone, on le reconvertit en libellé de mois lisible.
+// cf. section "Bug systémique — dates déguisées" du suivi projet.
+function periodLabelFromCell(raw) {
+const s = str(raw);
+if (typeof raw === "number" || /^\d{4,6}$/.test(s)) {
+const iso = sheetDate(raw);
+const [y, m] = (iso || "").split("-").map(Number);
+if (y && m >= 1 && m <= 12) {
+const mois = MOIS_FR[m - 1];
+return `${mois.charAt(0).toUpperCase()}${mois.slice(1)} ${y}`;
+}
+}
+return s;
+}
+
 // Index des colonnes d'après une ligne d'en-tête (correspondance exacte, espaces ignorés).
 function headerIndex(header) {
 const map = {};
@@ -345,7 +368,7 @@ iScoreFinal = idx("Score final"), iMvp = idx("MVP attribué");
 return rows.slice(1).filter(r => !isBlankRow(r)).map(r => ({
 date: sheetDate(r[iDate]),
 periodType: str(r[iType]), // "Jour" | "Semaine" | "Mois"
-periodLabel: str(r[iPeriode]),
+periodLabel: periodLabelFromCell(r[iPeriode]),
 name: str(r[iVendeur]),
 store: str(r[iMagasin]),
 margeTotale: parseNum(r[iMargeTotale]),
