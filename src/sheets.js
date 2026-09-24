@@ -51,7 +51,7 @@ return _sheets;
 }
 
 // Lit une plage de cellules, valeurs brutes (nombres en JS number, pas de mise en forme).
-async function readRange(spreadsheetId, range) {
+export async function readRange(spreadsheetId, range) {
 if (!spreadsheetId) return [];
 const sheets = sheetsClient();
 const res = await sheets.spreadsheets.values.get({

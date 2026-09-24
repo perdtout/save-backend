@@ -7,6 +7,7 @@ import { fetchVisits } from "./notion.js";
 import { fetchResultsData, fetchGoatBundle, fetchActions, fetchProcess } from "./sheets.js";
 import { login, requireAuth, filterForUser } from "./auth.js";
 import { fetchDossiers, createDossier, updateDossier, clotureDossier, indicateurs } from "./atm.js";
+import { fetchTarifs, tarifsPourUtilisateur } from "./tarifs.js";
 
 const app = express();
 app.use(cors({ origin: process.env.CORS_ORIGIN || "*" }));
@@ -86,6 +87,7 @@ const cache = {
   goatBundle: { data: null, ts: 0 },
   actions: { data: null, ts: 0 },
   process: { data: null, ts: 0 },
+  tarifs:  { data: null, ts: 0 },
 };
 // Les dossiers ATM sont filtrés par magasin : une entrée de cache par magasin,
 // plus une entrée "zone" pour le responsable de zone.
@@ -140,6 +142,14 @@ async function getProcess(force = false) {
   return data;
 }
 
+async function getTarifs(force = false) {
+  const now = Date.now();
+  if (!force && cache.tarifs.data && now - cache.tarifs.ts < CACHE_TTL) return cache.tarifs.data;
+  const data = await fetchTarifs();
+  cache.tarifs = { data, ts: now };
+  return data;
+}
+
 async function getAtm(store, force = false) {
   const key = store || "zone";
   const now = Date.now();
@@ -184,6 +194,7 @@ app.get("/api/health", (req, res) => res.json({
     sheetGoat:    !!process.env.GOOGLE_SHEET_GOAT_ID,
     sheetActions: !!process.env.GOOGLE_SHEET_ACTIONS_ID,
     sheetProcess: !!process.env.GOOGLE_SHEET_PROCESS_ID,
+    sheetTarifs:  !!process.env.GOOGLE_SHEET_TARIFS_ID,
   },
 }));
 
@@ -311,6 +322,20 @@ app.get("/api/process", requireAuth, async (req, res) => {
   }
 });
 
+// Tarifs réparation (onglet « Au comptoir »)
+// Tout compte connecté y accède. Le RZ voit en plus les prix d'achat, les
+// marges et les anomalies de saisie du classeur ; lui seul peut forcer la relecture.
+app.get("/api/tarifs", requireAuth, async (req, res) => {
+  try {
+    const force = req.query.refresh === "1" && req.user.role === "rz";
+    const data = await getTarifs(force);
+    res.json(tarifsPourUtilisateur(data, req.user));
+  } catch (e) {
+    console.error("Erreur /api/tarifs:", e.message);
+    res.status(502).json({ error: "Lecture du classeur Tarifs impossible", detail: e.message });
+  }
+});
+
 // ─── Dossiers ATM ────────────────────────────────────────────────────────────
 // Premières routes d'écriture de l'app. Le magasin d'un compte n'est jamais lu
 // depuis le corps de la requête : il vient du jeton, et atm.js le revérifie.
@@ -371,6 +396,7 @@ app.post("/api/refresh", requireAuth, async (req, res) => {
   cache.goatBundle = { data: null, ts: 0 };
   cache.actions = { data: null, ts: 0 };
   cache.process = { data: null, ts: 0 };
+  cache.tarifs  = { data: null, ts: 0 };
   invalidateAtm();
   invalidateAlternance();
   res.json({ ok: true, message: "Cache vidé. Prochaine requête relit Notion." });
