@@ -11,6 +11,8 @@
 // Onglets attendus (le texte des en-têtes compte, pas leur position) :
 //   Tarifs         : Marque | Modèle | GP (€ TTC) | <Réparation> PA | <Réparation> MO | … | Actif | Remarque
 //   Prix fixes     : Marque | Modèle | Réparation | Prix TTC   (utilisé tant que le PA est vide)
+//                    Une vitre arrière APPLE listée ici ne se fait que dans les magasins
+//                    « Magasins vitre arrière » (Pontarlier) ; les autres vitres, partout.
 //   Micro-soudure  : Prestation | Prix TTC | Remarque
 //   Paramètres     : Paramètre | Valeur
 import { readRange } from "./sheets.js";
@@ -96,6 +98,8 @@ export function buildTarifs({ tarifs = [], fixes = [], micro = [], params = [] }
 
   // Prix fixes : clé "marque|modèle|réparation"
   const prixFixes = new Map();
+  // Vitres arrière Apple listées dans Prix fixes = réalisées seulement à Pontarlier.
+  const vitresRestreintes = new Set();
   const hf = trouverEntete(fixes, "Marque");
   if (hf) {
     const iM = hf.idx("Marque"), iMod = hf.idx("Modèle"), iRep = hf.idx("Réparation"), iP = hf.idx("Prix TTC");
@@ -104,6 +108,7 @@ export function buildTarifs({ tarifs = [], fixes = [], micro = [], params = [] }
       const rep = REPARATIONS.find(x => cle(r[iRep]) === cle(x.col) || cle(r[iRep]) === cle(x.libelle));
       const prix = num(r[iP]);
       if (!rep) { anomalies.push(`Prix fixes : réparation « ${str(r[iRep])} » inconnue (${str(r[iMod])})`); continue; }
+      if (rep.id === "vitre-ar" && cle(r[iM]) === "apple") vitresRestreintes.add(`${cle(r[iM])}|${cle(r[iMod])}`);
       if (prix == null || Number.isNaN(prix) || prix > MONTANT_MAX) { anomalies.push(`Prix fixes : prix illisible pour ${str(r[iMod])} — ${rep.col}`); continue; }
       prixFixes.set(`${cle(r[iM])}|${cle(r[iMod])}|${rep.id}`, prix);
     }
@@ -146,7 +151,12 @@ export function buildTarifs({ tarifs = [], fixes = [], micro = [], params = [] }
     }
     if (!reparations.length) continue;
 
-    for (const rp of reparations) rp.prixAvecGP = gp ? round2(rp.prix + gp) : null;
+    const restreinte = vitresRestreintes.has(`${cle(marque)}|${cle(modele)}`);
+    for (const rp of reparations) {
+      rp.prixAvecGP = gp ? round2(rp.prix + gp) : null;
+      // Liste vide = faisable dans tous les magasins.
+      rp.magasins = rp.id === "vitre-ar" && restreinte ? [...p.magasinsVitre] : [];
+    }
     if (!marques.has(marque)) marques.set(marque, []);
     marques.get(marque).push({ nom: modele, gp, remarque: iRem >= 0 ? str(r[iRem]) : "", reparations });
   }
