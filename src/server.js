@@ -195,6 +195,7 @@ app.get("/api/health", (req, res) => res.json({
     sheetActions: !!process.env.GOOGLE_SHEET_ACTIONS_ID,
     sheetProcess: !!process.env.GOOGLE_SHEET_PROCESS_ID,
     sheetTarifs:  !!process.env.GOOGLE_SHEET_TARIFS_ID,
+    sheetTarifsV2: !!process.env.GOOGLE_SHEET_TARIFS_V2_ID,
   },
 }));
 

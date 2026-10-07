@@ -181,15 +181,180 @@ export function buildTarifs({ tarifs = [], fixes = [], micro = [], params = [] }
   };
 }
 
+// ─── Classeur V2 (taux horaire) ──────────────────────────────────────────────
+// Tarifs_V2_Save calcule lui-même le prix (colonne « Prix V2 » de chaque bloc) :
+//   prix = arrondi(((PA × coef) + (temps + prise en charge) × taux ÷ 60) × TVA) − décote
+// L'app affiche ce prix tel quel ; le PA, le temps et la MO servent au détail RZ.
+// Onglet « Tarifs V2 » : ligne de groupes (Écran origine, Écran compatible 1…)
+// au-dessus d'une ligne d'en-têtes commençant par « Marque ».
+// Onglet « Paramètres » : A/B = paramètres, E:H = copie des Prix fixes de Tarifs_SAVE.
+const GROUPES_V2 = [
+  { groupe: "Écran origine",       id: "ecran-origine",    famille: "Écran",         libelle: "Écran origine",       temps: "ecran" },
+  { groupe: "Écran compatible 1",  id: "ecran-compat-1",   famille: "Écran",         libelle: "Écran compatible",    temps: "ecran" },
+  { groupe: "Écran compatible 2",  id: "ecran-compat-2",   famille: "Écran",         libelle: "Écran compatible",    temps: "ecran" },
+  { groupe: "Coque arrière",       id: "vitre-ar",         famille: "Coque arrière", libelle: "Coque arrière",       temps: "coque" },
+  { groupe: "Batterie origine",    id: "batterie-origine", famille: "Batterie",      libelle: "Batterie origine",    temps: "batterie" },
+  { groupe: "Batterie compatible", id: "batterie-compat",  famille: "Batterie",      libelle: "Batterie compatible", temps: "batterie" },
+];
+
+export const PARAMS_V2_DEFAUT = {
+  ...PARAMS_DEFAUT, taux: 70, pec: 10,
+  tempsDefaut: { ecran: 15, batterie: null, coque: null },
+};
+
+export function buildTarifsV2({ v2 = [], params = [], micro = [] }) {
+  const anomalies = [];
+
+  // Paramètres (colonnes A/B) + prix fixes (colonnes E:H)
+  const p = { ...PARAMS_V2_DEFAUT, tempsDefaut: { ...PARAMS_V2_DEFAUT.tempsDefaut } };
+  const vitresRestreintes = new Set();
+  for (const r of params) {
+    const k = cle(r?.[0]); const v = num(r?.[1]);
+    if (k && v != null && !Number.isNaN(v)) {
+      if (k.startsWith("taux horaire")) p.taux = v;
+      else if (k.includes("prise en charge")) p.pec = v;
+      else if (k.startsWith("coefficient")) p.coef = v;
+      else if (k === "tva") p.tva = v;
+      else if (k.startsWith("arrondi")) p.arrondi = v;
+      else if (k.startsWith("decote")) p.decote = v;
+      else if (k.startsWith("temps ecran")) p.tempsDefaut.ecran = v;
+      else if (k.startsWith("temps batterie")) p.tempsDefaut.batterie = v;
+      else if (k.startsWith("temps coque")) p.tempsDefaut.coque = v;
+    }
+    if (k.includes("vitre") && str(r?.[1]) && Number.isNaN(num(r[1]))) p.magasinsVitre = liste(r[1]);
+    if (k.includes("micro") && str(r?.[1]) && Number.isNaN(num(r[1]))) p.magasinsMicro = liste(r[1]);
+    // Prix fixes (E:H) : une vitre / coque arrière Apple listée = Pontarlier uniquement.
+    const marqueF = cle(r?.[4]), modeleF = cle(r?.[5]), repF = cle(r?.[6]);
+    if (marqueF === "apple" && modeleF && (repF.includes("vitre") || repF.includes("coque"))) {
+      vitresRestreintes.add(`${marqueF}|${modeleF}`);
+    }
+  }
+  for (const k of ["taux", "pec", "coef", "tva", "arrondi", "decote"]) {
+    if (!Number.isFinite(p[k]) || p[k] < 0 || p[k] > 1000) {
+      anomalies.push(`Paramètres : valeur « ${k} » illisible, valeur par défaut utilisée`);
+      p[k] = PARAMS_V2_DEFAUT[k];
+    }
+  }
+
+  // En-têtes : ligne « Marque » + ligne de groupes juste au-dessus (cellules fusionnées
+  // → le titre n'est que dans la 1re cellule, on le propage vers la droite).
+  const iEnt = v2.findIndex(r => cle(r?.[0]) === "marque");
+  if (iEnt < 0) throw new Error("Onglet Tarifs V2 : ligne d'en-tête introuvable (la 1re cellule doit valoir « Marque »)");
+  const sous = v2[iEnt].map(cle);
+  const grp = [];
+  let courant = "";
+  const ligneGroupes = iEnt > 0 ? v2[iEnt - 1] : [];
+  for (let c = 0; c < sous.length; c++) {
+    if (str(ligneGroupes[c])) courant = cle(ligneGroupes[c]);
+    grp[c] = courant;
+  }
+  const col = (nom) => sous.indexOf(cle(nom));
+  const colDans = (groupe, nom) => sous.findIndex((s, c) => grp[c] === cle(groupe) && s === cle(nom));
+  const iMarque = col("Marque"), iModele = col("Modèle"), iGP = col("GP (€ TTC)"),
+    iActif = col("Actif"), iRem = col("Remarque");
+  const iTemps = {
+    ecran: sous.findIndex(s => s.startsWith("temps ecran")),
+    batterie: sous.findIndex(s => s.startsWith("temps batterie")),
+    coque: sous.findIndex(s => s.startsWith("temps coque")),
+  };
+  if (iModele < 0) throw new Error("Onglet Tarifs V2 : colonne « Modèle » introuvable");
+  const blocs = GROUPES_V2.map(g => ({
+    ...g, iPA: colDans(g.groupe, "PA (€ HT)"), iPrix: colDans(g.groupe, "Prix V2"), iGamme: colDans(g.groupe, "Gamme"),
+  })).filter(b => b.iPrix >= 0);
+  if (!blocs.length) throw new Error("Onglet Tarifs V2 : aucune colonne « Prix V2 » trouvée");
+
+  const marques = new Map();
+  for (const r of v2.slice(iEnt + 1)) {
+    const marque = str(r[iMarque]); const modele = str(r[iModele]);
+    if (!marque || !modele) continue;
+    if (iActif >= 0 && cle(r[iActif]) === "non") continue;
+    const ou = `${marque} ${modele}`;
+
+    let gp = iGP >= 0 ? num(r[iGP]) : null;
+    if (Number.isNaN(gp) || gp > MONTANT_MAX) { anomalies.push(`${ou} : GP illisible`); gp = null; }
+
+    const reparations = [];
+    for (const b of blocs) {
+      const prix = num(r[b.iPrix]);
+      if (prix == null || prix === 0) continue;
+      if (Number.isNaN(prix) || prix < 0 || prix > MONTANT_MAX) {
+        anomalies.push(`${ou} — ${b.groupe} : prix V2 illisible (${str(r[b.iPrix])})`); continue;
+      }
+      const pa = b.iPA >= 0 ? num(r[b.iPA]) : null;
+      const base = { id: b.id, famille: b.famille, libelle: b.libelle, gamme: b.iGamme >= 0 ? str(r[b.iGamme]) : "" };
+      if (pa == null || Number.isNaN(pa)) {
+        // Pas de PA : prix fixe repris de Tarifs_SAVE par le classeur.
+        reparations.push({ ...base, source: "fixe", pa: null, temps: null, mo: null, prix, margeHT: null });
+        continue;
+      }
+      let temps = iTemps[b.temps] >= 0 ? num(r[iTemps[b.temps]]) : null;
+      if (temps == null || Number.isNaN(temps)) temps = p.tempsDefaut[b.temps];
+      const mo = temps != null ? round2((temps + p.pec) * p.taux / 60) : null;
+      if (temps == null) anomalies.push(`${ou} — ${b.groupe} : temps de réparation manquant`);
+      reparations.push({
+        ...base, source: "calcul", pa, temps, mo, prix,
+        margeHT: round2(prix / p.tva - pa),
+      });
+    }
+    if (!reparations.length) continue;
+
+    const restreinte = vitresRestreintes.has(`${cle(marque)}|${cle(modele)}`);
+    for (const rp of reparations) {
+      rp.prixAvecGP = gp ? round2(rp.prix + gp) : null;
+      rp.magasins = rp.id === "vitre-ar" && restreinte ? [...p.magasinsVitre] : [];
+    }
+    if (!marques.has(marque)) marques.set(marque, []);
+    marques.get(marque).push({ nom: modele, gp, remarque: iRem >= 0 ? str(r[iRem]) : "", reparations });
+  }
+
+  return {
+    version: 2,
+    params: p,
+    marques: [...marques].map(([nom, modeles]) => ({ nom, modeles })),
+    microSoudure: lireMicro(micro),
+    anomalies,
+  };
+}
+
+function lireMicro(micro) {
+  const out = [];
+  const hm = trouverEntete(micro, "Prestation");
+  if (!hm) return out;
+  const iN = hm.idx("Prestation"), iP = hm.idx("Prix TTC"), iR = hm.idx("Remarque");
+  for (const r of micro.slice(hm.ligne + 1)) {
+    if (!str(r[iN])) continue;
+    const prix = num(r[iP]);
+    out.push({ prestation: str(r[iN]), prix: Number.isNaN(prix) ? null : prix, remarque: iR >= 0 ? str(r[iR]) : "" });
+  }
+  return out;
+}
+
 // ─── Lecture du classeur ─────────────────────────────────────────────────────
+const lireSansBloquer = (id, plage) => readRange(id, plage).catch(e => {
+  console.warn(`Tarifs : lecture ${plage} impossible — ${e.message}`);
+  return [];
+});
+
 export async function fetchTarifs() {
+  const idV2 = process.env.GOOGLE_SHEET_TARIFS_V2_ID;
   const id = process.env.GOOGLE_SHEET_TARIFS_ID;
+  if (idV2) {
+    // Micro-soudure reste dans Tarifs_SAVE.
+    const [v2, params, micro] = await Promise.all([
+      readRange(idV2, "'Tarifs V2'!A1:AZ1000"),
+      lireSansBloquer(idV2, "'Paramètres'!A1:H300"),
+      id ? lireSansBloquer(id, "'Micro-soudure'!A1:C200") : Promise.resolve([]),
+    ]);
+    return {
+      configured: true,
+      sheetUrl: `https://docs.google.com/spreadsheets/d/${idV2}/edit`,
+      updated: new Date().toISOString(),
+      ...buildTarifsV2({ v2, params, micro }),
+    };
+  }
   if (!id) return { configured: false, marques: [], microSoudure: [], params: PARAMS_DEFAUT, anomalies: [] };
   // Un onglet absent (Prix fixes, Micro-soudure, Paramètres) n'empêche pas la page de s'afficher.
-  const lire = (plage) => readRange(id, plage).catch(e => {
-    console.warn(`Tarifs : lecture ${plage} impossible — ${e.message}`);
-    return [];
-  });
+  const lire = (plage) => lireSansBloquer(id, plage);
   const [tarifs, fixes, micro, params] = await Promise.all([
     readRange(id, "'Tarifs'!A1:Z1000"),
     lire("'Prix fixes'!A1:D1000"),
@@ -214,7 +379,7 @@ export function tarifsPourUtilisateur(data, user) {
       ...m,
       modeles: m.modeles.map(mod => ({
         ...mod,
-        reparations: mod.reparations.map(({ pa, mo, margeHT, ...r }) => r),
+        reparations: mod.reparations.map(({ pa, mo, temps, margeHT, ...r }) => r),
       })),
     })),
   };
