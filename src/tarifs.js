@@ -200,9 +200,43 @@ const GROUPES_V2 = [
 export const PARAMS_V2_DEFAUT = {
   ...PARAMS_DEFAUT, taux: 70, pec: 10,
   tempsDefaut: { ecran: 15, batterie: null, coque: null },
+  tempsPieceSup: 5,     // autres marques : minutes ajoutées par pièce au-delà de la première
+  supplementColle: 10,  // autres marques : écran à coller = écran + ce supplément
 };
 
-export function buildTarifsV2({ v2 = [], params = [], micro = [] }) {
+// Onglet « Autres marques » : temps forfaitaires par marque pour les téléphones
+// hors grille. Le vendeur ne saisit pas de temps, seulement le coût des pièces.
+export const CATEGORIES_AUTRES = [
+  { id: "ecran",       libelle: "Écran",          col: "Temps écran (min)" },
+  { id: "ecranColle",  libelle: "Écran à coller", col: "Temps écran à coller (min)" },
+  { id: "batterie",    libelle: "Batterie",       col: "Temps batterie (min)" },
+  { id: "vitre",       libelle: "Vitre arrière",  col: "Temps vitre arrière (min)" },
+];
+
+function lireAutresMarques(rows, p, anomalies) {
+  const h = trouverEntete(rows, "Marque");
+  if (!h) return [];
+  const iActif = h.idx("Actif"), iRem = h.idx("Remarque");
+  const out = [];
+  for (const r of rows.slice(h.ligne + 1)) {
+    const nom = str(r[0]);
+    if (!nom || (iActif >= 0 && cle(r[iActif]) === "non")) continue;
+    const temps = {};
+    for (const c of CATEGORIES_AUTRES) {
+      const i = h.idx(c.col);
+      let v = i >= 0 ? num(r[i]) : null;
+      if (c.id === "ecranColle" && (v == null || Number.isNaN(v)) && temps.ecran != null) v = temps.ecran + p.supplementColle;
+      if (v == null || Number.isNaN(v) || v < 0 || v > 480) {
+        if (v != null) anomalies.push(`Autres marques — ${nom} : ${c.col} illisible (${str(r[i])})`);
+        temps[c.id] = null;
+      } else temps[c.id] = v;
+    }
+    out.push({ nom, temps, remarque: iRem >= 0 ? str(r[iRem]) : "" });
+  }
+  return out;
+}
+
+export function buildTarifsV2({ v2 = [], params = [], micro = [], autres = [] }) {
   const anomalies = [];
 
   // Paramètres (colonnes A/B) + prix fixes (colonnes E:H)
@@ -220,6 +254,8 @@ export function buildTarifsV2({ v2 = [], params = [], micro = [] }) {
       else if (k.startsWith("temps ecran")) p.tempsDefaut.ecran = v;
       else if (k.startsWith("temps batterie")) p.tempsDefaut.batterie = v;
       else if (k.startsWith("temps coque")) p.tempsDefaut.coque = v;
+      else if (k.startsWith("temps par piece")) p.tempsPieceSup = v;
+      else if (k.startsWith("supplement ecran")) p.supplementColle = v;
     }
     if (k.includes("vitre") && str(r?.[1]) && Number.isNaN(num(r[1]))) p.magasinsVitre = liste(r[1]);
     if (k.includes("micro") && str(r?.[1]) && Number.isNaN(num(r[1]))) p.magasinsMicro = liste(r[1]);
@@ -312,6 +348,8 @@ export function buildTarifsV2({ v2 = [], params = [], micro = [] }) {
     params: p,
     marques: [...marques].map(([nom, modeles]) => ({ nom, modeles })),
     microSoudure: lireMicro(micro),
+    autresMarques: lireAutresMarques(autres, p, anomalies),
+    categoriesAutres: CATEGORIES_AUTRES.map(({ id, libelle }) => ({ id, libelle })),
     anomalies,
   };
 }
@@ -340,16 +378,17 @@ export async function fetchTarifs() {
   const id = process.env.GOOGLE_SHEET_TARIFS_ID;
   if (idV2) {
     // Micro-soudure reste dans Tarifs_SAVE.
-    const [v2, params, micro] = await Promise.all([
+    const [v2, params, micro, autres] = await Promise.all([
       readRange(idV2, "'Tarifs V2'!A1:AZ1000"),
       lireSansBloquer(idV2, "'Paramètres'!A1:H300"),
       id ? lireSansBloquer(id, "'Micro-soudure'!A1:C200") : Promise.resolve([]),
+      lireSansBloquer(idV2, "'Autres marques'!A1:G100"),
     ]);
     return {
       configured: true,
       sheetUrl: `https://docs.google.com/spreadsheets/d/${idV2}/edit`,
       updated: new Date().toISOString(),
-      ...buildTarifsV2({ v2, params, micro }),
+      ...buildTarifsV2({ v2, params, micro, autres }),
     };
   }
   if (!id) return { configured: false, marques: [], microSoudure: [], params: PARAMS_DEFAUT, anomalies: [] };
