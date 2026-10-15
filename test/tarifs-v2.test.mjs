@@ -33,11 +33,11 @@ const params = [
 ];
 const autres = [
   ["AUTRES MARQUES"], [""], [""],
-  ["Marque", "Temps écran (min)", "Temps écran à coller (min)", "Temps batterie (min)", "Temps vitre arrière (min)", "Actif", "Remarque"],
-  ["Xiaomi", 20, 30, 15, 10, "Oui", ""],
-  ["Oppo", 25, "", 15, 10, "Oui", ""],
-  ["Wiko", 20, 30, 15, 10, "Non", ""],
-  ["Autres", 20, 30, 15, 10, "Oui", "Toute marque non listée"],
+  ["Marque", "Temps écran (min)", "Temps écran à coller (min)", "Temps batterie (min)", "Temps vitre arrière (min)", "Temps autre réparation (min)", "Actif", "Remarque"],
+  ["Xiaomi", 20, 30, 15, 10, 18, "Oui", ""],
+  ["Oppo", 25, "", 15, 10, 18, "Oui", ""],
+  ["Wiko", 20, 30, 15, 10, 18, "Non", ""],
+  ["Autres", 20, 30, 15, 10, 18, "Oui", "Toute marque non listée"],
 ];
 const micro = [["Prestation", "Prix TTC", "Remarque"], ["Connecteur de charge", 89.99, ""]];
 
@@ -75,7 +75,8 @@ check(d.params.tempsPieceSup === 5 && d.params.supplementColle === 10, "paramèt
 check(d.autresMarques.map(m => m.nom).join() === "Xiaomi,Oppo,Autres", "autres marques : Actif = Non exclu");
 check(d.autresMarques[0].temps.ecranColle === 30 && d.autresMarques[0].temps.vitre === 10, "Xiaomi : temps lus");
 check(d.autresMarques[1].temps.ecranColle === 35, "Oppo : écran à coller vide → écran + 10");
-check(d.categoriesAutres.length === 4, "4 catégories");
+check(d.categoriesAutres.length === 5, "5 catégories");
+check(d.autresMarques[0].temps.autre === 18, "Xiaomi : autre réparation 18 min");
 
 const mag = tarifsPourUtilisateur(d, { role: "magasin" });
 const r0 = mag.marques[0].modeles[0].reparations[0];
