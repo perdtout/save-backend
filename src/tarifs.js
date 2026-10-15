@@ -211,6 +211,7 @@ export const CATEGORIES_AUTRES = [
   { id: "ecranColle",  libelle: "Écran à coller", col: "Temps écran à coller (min)" },
   { id: "batterie",    libelle: "Batterie",       col: "Temps batterie (min)" },
   { id: "vitre",       libelle: "Vitre arrière",  col: "Temps vitre arrière (min)" },
+  { id: "autre",       libelle: "Autre réparation", col: "Temps autre réparation (min)" }, // connecteur, caméra, nappe…
 ];
 
 function lireAutresMarques(rows, p, anomalies) {
