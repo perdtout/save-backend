@@ -29,10 +29,19 @@ const params = [
   ["Temps de prise en charge client (min)", 10],
   ["Coefficient pièce", 1.3], ["TVA", 1.2], ["Arrondi (€)", 10], ["Décote (€)", 0.01],
   ["Temps écran par défaut (min)", 15], ["Temps batterie par défaut (min)", ""],
+  ["Temps par pièce supplémentaire (min)", 5], ["Supplément écran à coller (min)", 10],
+];
+const autres = [
+  ["AUTRES MARQUES"], [""], [""],
+  ["Marque", "Temps écran (min)", "Temps écran à coller (min)", "Temps batterie (min)", "Temps vitre arrière (min)", "Actif", "Remarque"],
+  ["Xiaomi", 20, 30, 15, 10, "Oui", ""],
+  ["Oppo", 25, "", 15, 10, "Oui", ""],
+  ["Wiko", 20, 30, 15, 10, "Non", ""],
+  ["Autres", 20, 30, 15, 10, "Oui", "Toute marque non listée"],
 ];
 const micro = [["Prestation", "Prix TTC", "Remarque"], ["Connecteur de charge", 89.99, ""]];
 
-const d = buildTarifsV2({ v2, params, micro });
+const d = buildTarifsV2({ v2, params, micro, autres });
 check(d.version === 2, "version 2");
 check(d.params.taux === 70 && d.params.pec === 10, "taux 70 € / PEC 10 min lus");
 const apple = d.marques.find(m => m.nom === "Apple");
@@ -61,6 +70,12 @@ const a14 = sam.modeles[0];
 check(a14.reparations.find(r => r.id === "ecran-origine").mo === 40.83, "A14 écran origine : (25+10)×70/60");
 check(a14.reparations.find(r => r.id === "vitre-ar").temps === 5, "A14 coque : 5 min");
 check(d.microSoudure.length === 1, "micro-soudure lue");
+
+check(d.params.tempsPieceSup === 5 && d.params.supplementColle === 10, "paramètres autres marques lus");
+check(d.autresMarques.map(m => m.nom).join() === "Xiaomi,Oppo,Autres", "autres marques : Actif = Non exclu");
+check(d.autresMarques[0].temps.ecranColle === 30 && d.autresMarques[0].temps.vitre === 10, "Xiaomi : temps lus");
+check(d.autresMarques[1].temps.ecranColle === 35, "Oppo : écran à coller vide → écran + 10");
+check(d.categoriesAutres.length === 4, "4 catégories");
 
 const mag = tarifsPourUtilisateur(d, { role: "magasin" });
 const r0 = mag.marques[0].modeles[0].reparations[0];
