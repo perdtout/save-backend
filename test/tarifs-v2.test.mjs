@@ -1,5 +1,5 @@
 // Test sans réseau du classeur Tarifs_V2_Save (taux horaire).
-import { buildTarifsV2, tarifsPourUtilisateur } from "../src/tarifs.js";
+import { buildTarifsV2, tarifsPourUtilisateur, devisCombine, devisPourUtilisateur, prixTemps } from "../src/tarifs.js";
 
 let failures = 0;
 const check = (cond, msg) => { if (!cond) { console.error("❌", msg); failures++; } };
@@ -77,6 +77,25 @@ check(d.autresMarques[0].temps.ecranColle === 30 && d.autresMarques[0].temps.vit
 check(d.autresMarques[1].temps.ecranColle === 35, "Oppo : écran à coller vide → écran + 10");
 check(d.categoriesAutres.length === 5, "5 catégories");
 check(d.autresMarques[0].temps.autre === 18, "Xiaomi : autre réparation 18 min");
+
+// Devis à plusieurs réparations
+check(d.params.tempsAutre === 18, "temps autre réparation = 18 (ligne Autres)");
+check(prixTemps(9, 15, d.params).prix === 49.99, "prixTemps = prix de la grille");
+// iPhone 8 : écran compatible (PA 9, 15 min) + batterie compatible (PA 8, 15 min)
+// → 15 min + 10 min (2e réparation), PA 17 → (17×1,3 + 35×70/60)×1,2 = 75,52 → 79,99
+const dv = devisCombine(d, { marque: "Apple", modele: "iPhone 8", reps: ["ecran-compat-1", "batterie-compat"] });
+check(dv.prix === 79.99 && dv.partCalcul.tempsFacture === 35, `écran + batterie iPhone 8 : 79,99 € (reçu ${dv.prix})`);
+check(dv.sommeSeparee === 99.98, "somme séparée 49,99 + 49,99");
+check(dv.prixAvecGP === 109.98, "avec GP");
+// + coque à prix fixe (Pontarlier) ajoutée telle quelle
+const dv2 = devisCombine(d, { marque: "Apple", modele: "iPhone 8", reps: ["ecran-compat-1", "vitre-ar"] });
+check(dv2.prix === 119.89 && dv2.magasins.join() === "Pontarlier", `écran + coque fixe : 49,99 + 69,90 (reçu ${dv2.prix})`);
+// + autre réparation (connecteur PA 8) : temps principal 18 > 15
+const dv3 = devisCombine(d, { marque: "Apple", modele: "iPhone 8", reps: ["ecran-compat-1"], autres: [{ pa: 8 }] });
+check(dv3.partCalcul.tempsPrincipal === 18 && dv3.partCalcul.tempsFacture === 38, "autre réparation : 18 min principales + 10");
+check(devisCombine(d, { marque: "Apple", modele: "iPhone 99", reps: ["x"] }).erreur, "modèle inconnu → erreur");
+const dvMag = devisPourUtilisateur(dv, { role: "magasin" });
+check(!("pa" in dvMag.partCalcul) && !("margeHT" in dvMag.partCalcul), "devis magasin : pas de PA ni marge");
 
 const mag = tarifsPourUtilisateur(d, { role: "magasin" });
 const r0 = mag.marques[0].modeles[0].reparations[0];
