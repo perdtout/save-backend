@@ -201,6 +201,8 @@ export const PARAMS_V2_DEFAUT = {
   ...PARAMS_DEFAUT, taux: 70, pec: 10,
   tempsDefaut: { ecran: 15, batterie: null, coque: null },
   tempsPieceSup: 5,     // autres marques : minutes ajoutées par pièce au-delà de la première
+  tempsReparationSup: 10, // grille Apple/Samsung : minutes ajoutées par réparation en plus de la principale
+  tempsAutre: 18,       // grille Apple/Samsung : temps d'une « autre réparation » (connecteur, caméra, nappe…)
   supplementColle: 10,  // autres marques : écran à coller = écran + ce supplément
 };
 
@@ -257,6 +259,7 @@ export function buildTarifsV2({ v2 = [], params = [], micro = [], autres = [] })
       else if (k.startsWith("temps coque")) p.tempsDefaut.coque = v;
       else if (k.startsWith("temps par piece")) p.tempsPieceSup = v;
       else if (k.startsWith("supplement ecran")) p.supplementColle = v;
+      else if (k.startsWith("temps par reparation")) p.tempsReparationSup = v;
     }
     if (k.includes("vitre") && str(r?.[1]) && Number.isNaN(num(r[1]))) p.magasinsVitre = liste(r[1]);
     if (k.includes("micro") && str(r?.[1]) && Number.isNaN(num(r[1]))) p.magasinsMicro = liste(r[1]);
@@ -344,12 +347,16 @@ export function buildTarifsV2({ v2 = [], params = [], micro = [], autres = [] })
     marques.get(marque).push({ nom: modele, gp, remarque: iRem >= 0 ? str(r[iRem]) : "", reparations });
   }
 
+  const autresMarques = lireAutresMarques(autres, p, anomalies);
+  const ligneAutres = autresMarques.find(m => /^autres?$/i.test(m.nom));
+  if (ligneAutres?.temps?.autre != null) p.tempsAutre = ligneAutres.temps.autre;
+
   return {
     version: 2,
     params: p,
     marques: [...marques].map(([nom, modeles]) => ({ nom, modeles })),
     microSoudure: lireMicro(micro),
-    autresMarques: lireAutresMarques(autres, p, anomalies),
+    autresMarques,
     categoriesAutres: CATEGORIES_AUTRES.map(({ id, libelle }) => ({ id, libelle })),
     anomalies,
   };
@@ -407,6 +414,69 @@ export async function fetchTarifs() {
     updated: new Date().toISOString(),
     ...buildTarifs({ tarifs, fixes, micro, params }),
   };
+}
+
+// ─── Devis à plusieurs réparations (grille Apple / Samsung) ─────────────────
+// Même règle que la grille : la main d'œuvre principale est la plus longue des
+// réparations choisies, chaque réparation en plus ajoute `tempsReparationSup`
+// minutes, et les prix d'achat s'additionnent. Une « autre réparation »
+// (connecteur, caméra, nappe…) compte `tempsAutre` minutes et son prix d'achat
+// est saisi au comptoir. Les prix fixes (coques iPhone de Pontarlier) s'ajoutent
+// tels quels : ils comprennent déjà leur main d'œuvre.
+export function prixTemps(pa, temps, p) {
+  const mo = (temps + p.pec) * p.taux / 60;
+  const brut = Math.round(((pa * p.coef) + mo) * p.tva * 1e6) / 1e6;
+  const arr = p.arrondi > 0 ? Math.floor(brut / p.arrondi + 0.5) * p.arrondi : brut;
+  const prix = arr <= 0 ? 0 : round2(arr - (p.decote || 0));
+  return { prix, mo: round2(mo), margeHT: round2(prix / p.tva - pa) };
+}
+
+export function devisCombine(data, { marque, modele, reps = [], autres = [] }) {
+  const p = data.params;
+  const mod = data.marques?.find(m => cle(m.nom) === cle(marque))?.modeles.find(m => cle(m.nom) === cle(modele));
+  if (!mod) return { erreur: "Modèle introuvable dans la grille" };
+  const lignes = [];
+  for (const id of [...new Set(reps)]) {
+    const r = mod.reparations.find(x => x.id === id);
+    if (!r) return { erreur: `Réparation inconnue : ${id}` };
+    lignes.push(r);
+  }
+  const autresOk = autres.filter(a => Number.isFinite(a.pa) && a.pa >= 0 && a.pa <= MONTANT_MAX);
+  if (autresOk.length !== autres.length) return { erreur: "Prix d'achat d'une autre réparation illisible" };
+  if (!lignes.length && !autresOk.length) return { erreur: "Aucune réparation choisie" };
+
+  const calcul = lignes.filter(r => r.source === "calcul" && r.pa != null && r.temps != null);
+  const fixes = lignes.filter(r => !calcul.includes(r));
+  const pieces = [
+    ...calcul.map(r => ({ pa: r.pa, temps: r.temps })),
+    ...autresOk.map(a => ({ pa: a.pa, temps: p.tempsAutre })),
+  ];
+  let partCalcul = null;
+  if (pieces.length) {
+    const tempsPrincipal = Math.max(...pieces.map(x => x.temps));
+    const sup = (pieces.length - 1) * p.tempsReparationSup;
+    const pa = round2(pieces.reduce((s, x) => s + x.pa, 0));
+    const c = prixTemps(pa, tempsPrincipal + sup, p);
+    partCalcul = { nbPieces: pieces.length, tempsPrincipal, tempsSup: sup, tempsFacture: tempsPrincipal + sup + p.pec, pa, ...c };
+  }
+  const totalFixes = round2(fixes.reduce((s, r) => s + r.prix, 0));
+  const prix = round2((partCalcul?.prix || 0) + totalFixes);
+  const magasins = [...new Set(lignes.flatMap(r => r.magasins || []))];
+  return {
+    prix,
+    prixAvecGP: mod.gp ? round2(prix + mod.gp) : null,
+    gp: mod.gp ?? null,
+    magasins,
+    partCalcul,
+    fixes: fixes.map(r => ({ id: r.id, prix: r.prix })),
+    sommeSeparee: round2(lignes.reduce((s, r) => s + r.prix, 0)),
+  };
+}
+
+export function devisPourUtilisateur(d, user) {
+  if (user?.role === "rz" || !d.partCalcul) return d;
+  const { pa, mo, margeHT, ...reste } = d.partCalcul;
+  return { ...d, partCalcul: reste };
 }
 
 // Un magasin n'a pas besoin des prix d'achat ni des marges.

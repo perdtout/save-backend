@@ -7,7 +7,7 @@ import { fetchVisits } from "./notion.js";
 import { fetchResultsData, fetchGoatBundle, fetchActions, fetchProcess } from "./sheets.js";
 import { login, requireAuth, filterForUser } from "./auth.js";
 import { fetchDossiers, createDossier, updateDossier, clotureDossier, indicateurs } from "./atm.js";
-import { fetchTarifs, tarifsPourUtilisateur } from "./tarifs.js";
+import { fetchTarifs, tarifsPourUtilisateur, devisCombine, devisPourUtilisateur } from "./tarifs.js";
 
 const app = express();
 app.use(cors({ origin: process.env.CORS_ORIGIN || "*" }));
@@ -334,6 +334,28 @@ app.get("/api/tarifs", requireAuth, async (req, res) => {
   } catch (e) {
     console.error("Erreur /api/tarifs:", e.message);
     res.status(502).json({ error: "Lecture du classeur Tarifs impossible", detail: e.message });
+  }
+});
+
+// Devis à plusieurs réparations sur un modèle de la grille.
+//   /api/tarifs/devis?marque=Apple&modele=iPhone 12&reps=ecran-compat-1,batterie-compat&autres=12.5,8
+// `autres` = prix d'achat HT des « autres réparations » saisis au comptoir.
+// Le calcul se fait côté serveur pour ne jamais envoyer les prix d'achat aux magasins.
+app.get("/api/tarifs/devis", requireAuth, async (req, res) => {
+  try {
+    const data = await getTarifs();
+    const liste = (v) => String(v || "").split(",").map(x => x.trim()).filter(Boolean);
+    const d = devisCombine(data, {
+      marque: String(req.query.marque || ""),
+      modele: String(req.query.modele || ""),
+      reps: liste(req.query.reps),
+      autres: liste(req.query.autres).map(x => ({ pa: Number(x.replace(",", ".")) })),
+    });
+    if (d.erreur) return res.status(400).json({ error: d.erreur });
+    res.json(devisPourUtilisateur(d, req.user));
+  } catch (e) {
+    console.error("Erreur /api/tarifs/devis:", e.message);
+    res.status(502).json({ error: "Calcul du devis impossible", detail: e.message });
   }
 });
 
