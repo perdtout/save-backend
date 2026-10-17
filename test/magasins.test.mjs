@@ -4,7 +4,7 @@
 //    erreur) est désormais détecté et lève une erreur explicite au lieu de
 //    renvoyer silencieusement une structure vide.
 // Lancer avec : npm test
-import { buildMagasinsFromRows } from "../src/sheets.js";
+import { buildMagasinsFromRows, _internal } from "../src/sheets.js";
 
 const FIXTURE = [
   ["SAVE — Suivi mensuel Magasins (remplace Page1_Ratios + Page2_Mobileo_ATM)"],
@@ -47,6 +47,37 @@ try {
 } catch (e) {
   if (!/Magasin/.test(e.message)) fail(`l'erreur levée ne nomme pas la colonne manquante : ${e.message}`);
 }
+
+// --- Protected (17/10/2026) : colonnes facultatives en fin de tableau ---
+if (Object.keys(page2.protected).length !== 0) fail("sans colonnes Protected, page2.protected doit rester vide");
+
+const withProt = FIXTURE.map((r) => [...r]);
+withProt[3].push("Protected Détail", "Protected vendus", "Protected vendus J-1", "Protected Objectif", "Commentaire Protected");
+withProt[4].push("Mathis 1, Narcisse 2", 3, 1, 6, "Bravo Narcisse");
+withProt[5].push("—", 0, "", "", "");
+const p2 = buildMagasinsFromRows(withProt).page2;
+const pont = p2.protected.Pontarlier;
+if (!pont || pont.total !== 3 || pont.trend !== 2 || pont.vendeurs.Narcisse !== 2) fail("Protected Pontarlier mal lu");
+if (pont.status !== "warn") fail("statut Protected Pontarlier (3/6) devrait être warn");
+if (p2.protected.Dijon.objectif !== 6 || p2.protected.Dijon.status !== "bad") fail("objectif Protected par défaut (6) non appliqué");
+if (p2.analysis.protected.Pontarlier !== "Bravo Narcisse") fail("commentaire Protected non lu");
+
+// --- GOAT : colonnes Protected + barème ---
+const { parseGoatRows, buildVendorsMTD } = _internal;
+const now = new Date();
+const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+const GOAT_HEAD = ["Date", "Type période", "Période", "Vendeur", "Magasin", "Marge Totale (€)", "Marge Accessoires (€)", "Marge GP (€)", "Ratio Accessoires (%)", "Ratio GP (%)", "Contrats Mobileo", "ATM vendus", "Ratio ATM (%)", "Prime ATM historique (€)", "Occasion vendus", "Solo", "Objectif Mobileo individuel", "Score Accessoires", "Score GP", "Score Mobileo", "Score ATM (calculé)", "Score brut", "Score final", "MVP attribué", "Note", "Protected vendus", "Score Protected"];
+const goatRows = parseGoatRows([
+  GOAT_HEAD,
+  [day, "Jour", "x", "Mathis", "Pontarlier", 300, 80, 60, "", "", 1, 0, "", "", 1, "Non", 6, "", "", "", "", "", "", "Non", "", 2, ""],
+  [day, "Semaine", "S", "Mathis", "Pontarlier", 300, 80, 60, "", "", 1, 0, "", "", 1, "Non", 6, 20, 20, 13.3, 0, 73.3, 73.3, "Non", "", 2, 20],
+  [day, "Semaine", "S-old", "Nassim", "Lons-le-Saunier", 300, 80, 60, "", "", 1, 0, "", "", 1, "Non", 6, 25, 25, 30, 20, 100, 100, "Non", "", "", ""],
+]);
+if (goatRows[0].protected !== 2) fail("Protected vendus (GOAT) non lu");
+if (goatRows[1].breakdown.protected !== 20) fail("Score Protected non lu");
+if (goatRows[2].breakdown.protected !== null) fail("ancienne ligne : Score Protected doit être null (ancien barème)");
+const mtd = buildVendorsMTD(goatRows).vendors.find((v) => v.name === "Mathis");
+if (!mtd || mtd.protected !== 2 || mtd.objectifProtected !== 3) fail("cumul Protected vendeur / objectif individuel incorrect");
 
 if (failures) {
   console.error(`\n${failures} test(s) en échec.`);
