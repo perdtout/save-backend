@@ -171,6 +171,11 @@ const MAGASINS_COLUMNS = [
   "Commentaire Accessoires", "Commentaire GP", "Commentaire Mobileo", "Commentaire ATM",
 ];
 
+// Colonnes Protected (ajoutées le 17/10/2026, en fin de tableau après
+// "Commentaire ATM"). Facultatives : si elles ne sont pas encore créées dans
+// la feuille, l'app continue d'afficher le reste et Protected reste à "—".
+const PROTECTED_OBJ_MAGASIN = 6; // contrats Protected par magasin et par mois
+
 // Construit un accesseur de colonnes et vérifie que toutes les colonnes
 // attendues sont bien présentes dans la ligne d'en-tête. Contrairement à
 // headerIndex() seul (qui renvoie silencieusement -1 pour un nom absent),
@@ -233,13 +238,17 @@ export function buildMagasinsFromRows(rows) {
     iAtm = idx("ATM vendus"), iAtmJ1 = idx("ATM vendus J-1"),
     iAtmOcc = idx("ATM Occasions"), iAtmRatio = idx("ATM Ratio (%)"), iAtmRatioJ1 = idx("ATM Ratio J-1 (%)"),
     iComAcc = idx("Commentaire Accessoires"), iComGP = idx("Commentaire GP"),
-    iComMob = idx("Commentaire Mobileo"), iComAtm = idx("Commentaire ATM");
+    iComMob = idx("Commentaire Mobileo"), iComAtm = idx("Commentaire ATM"),
+    iProtDetail = idx("Protected Détail"), iProt = idx("Protected vendus"),
+    iProtJ1 = idx("Protected vendus J-1"), iProtObj = idx("Protected Objectif"),
+    iComProt = idx("Commentaire Protected");
+  const hasProtected = iProt !== -1;
 
   const accessoires = {}, gp = {}, occasion = {};
-  const mobileo = {}, atm = {};
+  const mobileo = {}, atm = {}, protectedSales = {};
   const analysis1 = { accessoires: {}, gp: {} };
-  const analysis2 = { mobileo: {}, atm: {} };
-  let zoneComment = { acc: "", gp: "", mobileo: "", atm: "" };
+  const analysis2 = { mobileo: {}, atm: {}, protected: {} };
+  let zoneComment = { acc: "", gp: "", mobileo: "", atm: "", protected: "" };
 
   for (let r = MAGASINS_DATA_START; r < rows.length; r++) {
     const row = rows[r];
@@ -252,6 +261,7 @@ export function buildMagasinsFromRows(rows) {
         zoneComment = {
           acc: str(row[iComAcc]), gp: str(row[iComGP]),
           mobileo: str(row[iComMob]), atm: str(row[iComAtm]),
+          protected: iComProt !== -1 ? str(row[iComProt]) : "",
         };
       }
       continue;
@@ -307,6 +317,20 @@ export function buildMagasinsFromRows(rows) {
       status: atmRatio != null && atmRatio >= 10 ? "ok" : "bad",
     };
 
+    if (hasProtected) {
+      const protTotal = parseNum(row[iProt]);
+      const protJ1 = iProtJ1 !== -1 ? parseNum(row[iProtJ1]) : null;
+      const protObj = (iProtObj !== -1 ? parseNum(row[iProtObj]) : null) ?? PROTECTED_OBJ_MAGASIN;
+      protectedSales[store] = {
+        vendeurs: iProtDetail !== -1 ? parseVendorDetail(row[iProtDetail]) : {},
+        total: protTotal ?? 0,
+        objectif: protObj,
+        trend: (protTotal != null && protJ1 != null) ? +(protTotal - protJ1).toFixed(1) : 0,
+        status: (protTotal ?? 0) >= protObj ? "ok" : (protTotal ?? 0) > 0 ? "warn" : "bad",
+      };
+      if (iComProt !== -1 && str(row[iComProt])) analysis2.protected[store] = str(row[iComProt]);
+    }
+
     if (str(row[iComAcc])) analysis1.accessoires[store] = str(row[iComAcc]);
     if (str(row[iComGP])) analysis1.gp[store] = str(row[iComGP]);
     if (str(row[iComMob])) analysis2.mobileo[store] = str(row[iComMob]);
@@ -315,7 +339,7 @@ export function buildMagasinsFromRows(rows) {
 
   return {
     page1: { accessoires, gp, occasion, analysis: analysis1 },
-    page2: { mobileo, atm, analysis: analysis2 },
+    page2: { mobileo, atm, protected: protectedSales, analysis: analysis2 },
     zoneComment,
   };
 }
@@ -325,13 +349,13 @@ export async function fetchResultsData() {
   const id = process.env.GOOGLE_SHEET_MAGASINS_ID;
   if (!id) throw new Error("GOOGLE_SHEET_MAGASINS_ID absent des variables d'environnement");
 
-  const rows = await readRange(id, "A1:Z50");
+  const rows = await readRange(id, "A1:AH50");
   const meta = parsePeriodLine(rows[1] && rows[1][0]);
   const { page1, page2, zoneComment } = buildMagasinsFromRows(rows);
 
   // Pas de section "fait marquant" dédiée dans la feuille : on reconstitue la
   // synthèse RZ à partir des commentaires de la ligne ZONE.
-  const syntheseRZ = [zoneComment.acc, zoneComment.gp, zoneComment.mobileo, zoneComment.atm]
+  const syntheseRZ = [zoneComment.acc, zoneComment.gp, zoneComment.mobileo, zoneComment.atm, zoneComment.protected]
     .filter(Boolean).join(" ");
 
   return {
@@ -351,7 +375,9 @@ export async function fetchResultsData() {
 // Contrats Mobileo | ATM vendus | Ratio ATM (%) | Prime ATM historique (€) |
 // Occasion vendus | Solo | Objectif Mobileo individuel | Score Accessoires |
 // Score GP | Score Mobileo | Score ATM (calculé) | Score brut | Score final |
-// MVP attribué | Note
+// MVP attribué | Note | Protected vendus | Score Protected
+// (les deux dernières ajoutées le 17/10/2026 en fin de tableau, après "Note",
+// pour ne pas décaler les colonnes existantes).
 function parseGoatRows(rows) {
 if (!rows.length) return [];
 const idx = headerIndex(rows[0]);
@@ -363,7 +389,8 @@ iRatioGP = idx("Ratio GP (%)"), iMobileo = idx("Contrats Mobileo"),
 iAtmVendus = idx("ATM vendus"), iOccasion = idx("Occasion vendus"),
 iSolo = idx("Solo"), iScoreAcc = idx("Score Accessoires"), iScoreGP = idx("Score GP"),
 iScoreMobileo = idx("Score Mobileo"), iScoreAtm = idx("Score ATM (calculé)"),
-iScoreFinal = idx("Score final"), iMvp = idx("MVP attribué");
+iScoreFinal = idx("Score final"), iMvp = idx("MVP attribué"),
+iProtected = idx("Protected vendus"), iScoreProtected = idx("Score Protected");
 
 return rows.slice(1).filter(r => !isBlankRow(r)).map(r => ({
 date: sheetDate(r[iDate]),
@@ -379,6 +406,7 @@ ratioGP: parseNum(r[iRatioGP]),
 mobileo: parseNum(r[iMobileo]) ?? 0,
 atm: parseNum(r[iAtmVendus]) ?? 0,
 occasion: parseNum(r[iOccasion]) ?? 0,
+protected: iProtected !== -1 ? (parseNum(r[iProtected]) ?? 0) : 0,
 isSolo: isOui(r[iSolo]),
 mvp: isOui(r[iMvp]),
 total: parseNum(r[iScoreFinal]) ?? 0,
@@ -387,6 +415,9 @@ accessoires: parseNum(r[iScoreAcc]) ?? 0,
 gp: parseNum(r[iScoreGP]) ?? 0,
 mobileo: parseNum(r[iScoreMobileo]) ?? 0,
 atm: parseNum(r[iScoreAtm]) ?? 0,
+// null = période notée avec l'ancien barème (Acc 25 / GP 25 / Mobileo 30 /
+// ATM 20) ; un nombre = nouveau barème 5 × 20 (depuis la semaine du 13/10/2026).
+protected: iScoreProtected !== -1 ? parseNum(r[iScoreProtected]) : null,
 },
 })).filter(r => r.name && r.periodType);
 }
@@ -467,7 +498,7 @@ if (!agg[k]) {
 agg[k] = {
 name: r.name, store: r.store, role: VENDOR_ROLES[r.name] || "",
 margeTotale: 0, margeAccessoires: 0, margeGP: 0,
-mobileo: 0, atm: 0, occasion: 0, jours: 0, dernierJour: "",
+mobileo: 0, atm: 0, occasion: 0, protected: 0, jours: 0, dernierJour: "",
 };
 }
 const a = agg[k];
@@ -478,6 +509,7 @@ a.margeGP += r.margeGP || 0;
 a.mobileo += r.mobileo || 0;
 a.atm += r.atm || 0;
 a.occasion += r.occasion || 0;
+a.protected += r.protected || 0;
 if (marge > 0) a.jours += 1;
 if (r.date > a.dernierJour) a.dernierJour = r.date;
 }
@@ -501,6 +533,7 @@ objectifGP: 20,
 objectifOccasion: +((OCC_OBJ[v.store] || 0) / activeCount).toFixed(1),
 objectifMobileo: +(MOBILEO_OBJ_MAGASIN / activeCount).toFixed(1),
 objectifATM: +(v.occasion * 0.10).toFixed(1),
+objectifProtected: +(PROTECTED_OBJ_MAGASIN / activeCount).toFixed(1),
 };
 }).sort((a, b) => b.margeTotale - a.margeTotale);
 
@@ -510,7 +543,7 @@ return { periode: cle, vendors };
 async function readGoatRows() {
 const id = process.env.GOOGLE_SHEET_GOAT_ID;
 if (!id) return [];
-const raw = await readRange(id, "A1:X5000");
+const raw = await readRange(id, "A1:AB5000");
 return parseGoatRows(raw);
 }
 
