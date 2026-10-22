@@ -5,6 +5,7 @@
 // Visites, ATM (dossiers) et Alternance restent sur Notion (notion.js / atm.js / alternance.js).
 import { google } from "googleapis";
 import fs from "fs";
+import { buildRace } from "./goatRace.js";
 
 const STORES = ["Pontarlier", "Lons-le-Saunier", "Dijon", "Besançon", "Chalon-sur-Saône"];
 const OCC_OBJ = { "Pontarlier": 50, "Lons-le-Saunier": 50, "Dijon": 25, "Besançon": 20, "Chalon-sur-Saône": 15 };
@@ -111,6 +112,7 @@ const s = String(v).trim();
 if (/^\d{4,6}$/.test(s)) return serialToISO(Number(s));
 return s;
 };
+
 
 const MOIS_FR = ["janvier", "février", "mars", "avril", "mai", "juin",
 "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
@@ -390,7 +392,8 @@ iAtmVendus = idx("ATM vendus"), iOccasion = idx("Occasion vendus"),
 iSolo = idx("Solo"), iScoreAcc = idx("Score Accessoires"), iScoreGP = idx("Score GP"),
 iScoreMobileo = idx("Score Mobileo"), iScoreAtm = idx("Score ATM (calculé)"),
 iScoreFinal = idx("Score final"), iMvp = idx("MVP attribué"),
-iProtected = idx("Protected vendus"), iScoreProtected = idx("Score Protected");
+iProtected = idx("Protected vendus"), iScoreProtected = idx("Score Protected"),
+iPrimeAtm = idx("Prime ATM historique(€)") !== -1 ? idx("Prime ATM historique(€)") : idx("Prime ATM historique (€)");
 
 return rows.slice(1).filter(r => !isBlankRow(r)).map(r => ({
 date: sheetDate(r[iDate]),
@@ -405,6 +408,7 @@ ratioAccessoires: parseNum(r[iRatioAcc]),
 ratioGP: parseNum(r[iRatioGP]),
 mobileo: parseNum(r[iMobileo]) ?? 0,
 atm: parseNum(r[iAtmVendus]) ?? 0,
+primeAtm: iPrimeAtm !== -1 ? (parseNum(r[iPrimeAtm]) ?? 0) : 0,
 occasion: parseNum(r[iOccasion]) ?? 0,
 protected: iProtected !== -1 ? (parseNum(r[iProtected]) ?? 0) : 0,
 isSolo: isOui(r[iSolo]),
@@ -460,7 +464,12 @@ score: r.total,
 start: r.date || "",
 }));
 
-return { weekly, monthly, titlesHistory };
+// Course GOAT (championnat F1 + courses du mois/semaine en cours) — un échec
+// de calcul ne doit jamais faire tomber l'écran GOAT existant.
+let race = null;
+try { race = buildRace(rows); } catch (e) { console.error("Erreur calcul course GOAT:", e.message); }
+
+return { weekly, monthly, titlesHistory, race };
 }
 
 const VENDOR_ROLES = {
