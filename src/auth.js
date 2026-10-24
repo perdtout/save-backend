@@ -157,9 +157,11 @@ export function filterForUser(data, user) {
     page2: {
       mobileo: pick(data.page2.mobileo),
       atm: pick(data.page2.atm),
+      protected: pick(data.page2.protected),
       analysis: {
         mobileo: pickAnalysis(data.page2.analysis?.mobileo),
         atm: pickAnalysis(data.page2.analysis?.atm),
+        protected: pickAnalysis(data.page2.analysis?.protected),
       },
     },
   };
