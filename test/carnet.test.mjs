@@ -1,7 +1,7 @@
 // Tests du carnet de réparations : logique pure, sans appel Google.
 import assert from "node:assert/strict";
 import { etatAcquis, valider, apprenantsVisibles, ligneVersInter } from "../src/carnet.js";
-import { denyTrainee } from "../src/auth.js";
+import { denyTrainee, denyFormationSeule, login } from "../src/auth.js";
 
 let ok = 0;
 const t = (nom, fn) => { fn(); ok++; console.log("  ✓", nom); };
@@ -53,7 +53,7 @@ t("visibilité des carnets", () => {
   assert.deepEqual(apprenantsVisibles({ role: "trainee", name: "Killiann Correjou", store: "Pontarlier" }).map(a => a.name), ["Killiann Correjou"]);
   const pont = apprenantsVisibles({ role: "store", store: "Pontarlier" }).map(a => a.name);
   assert.ok(pont.includes("Killiann Correjou")); assert.ok(!pont.includes("Maëlle Martin"));
-  assert.equal(apprenantsVisibles({ role: "store", store: "Dijon" }).length, 0);
+  assert.equal(apprenantsVisibles({ role: "store", store: "Chalon-sur-Saône" }).length, 0);
 });
 
 t("relecture ligne Sheets", () => {
@@ -68,6 +68,24 @@ t("denyTrainee bloque visites/alternance", () => {
   assert.equal(code, 403); assert.equal(suivant, false);
   denyTrainee({ user: { role: "store" } }, res, () => { suivant = true; });
   assert.equal(suivant, true);
+});
+
+t("stagiaire : formation seule, carnet visible par Dijon", () => {
+  let code = 0;
+  const res = { status: (c) => { code = c; return { json: () => {} }; } };
+  denyFormationSeule({ user: { role: "trainee", formationSeule: true, accesJusquau: "2999-12-31" } }, res, () => {});
+  assert.equal(code, 403);
+  const dij = apprenantsVisibles({ role: "store", store: "Dijon" }).map(a => a.name);
+  assert.deepEqual(dij, ["Leny Dufieux"]);
+  assert.equal(apprenantsVisibles({ role: "rz" })[0].role, "trainee");
+});
+
+t("stagiaire : connexion coupée après la fin du stage", () => {
+  process.env.PWD_LENY_DUFIEUX = "x";
+  const ok = login("leny.dufieux", "x");
+  const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Paris" });
+  if (today <= "2026-12-19") assert.ok(ok && ok.user.formationSeule);
+  else assert.equal(ok, null);
 });
 
 console.log(`carnet : ${ok} tests OK`);
