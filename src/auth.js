@@ -88,6 +88,23 @@ export const ACCOUNTS = {
     // 3 semaines travaillées en doublon (mardi–samedi) : 17/11 → 05/12.
     doublonJusquau: "2026-12-05",
   },
+
+  // ── Stagiaire (Dijon) : accès limité à la famille Formation
+  // `formationSeule` ferme tous les écrans commerciaux et comptoir côté
+  // serveur (denyFormationSeule) ; `accesJusquau` coupe la connexion après
+  // la fin du stage. Il remplit le même carnet de réparations que Killiann.
+  "leny.dufieux": {
+    role: "trainee",
+    store: "Dijon",
+    name: "Leny Dufieux",
+    env: "PWD_LENY_DUFIEUX",
+    debut: "2026-11-10",
+    referent: "Jules",
+    doublonJusquau: "2026-12-19",
+    periode: "Stage",
+    formationSeule: true,
+    accesJusquau: "2026-12-19",
+  },
 };
 
 /**
@@ -99,6 +116,11 @@ export function login(username, password) {
   const key = (username || "").toLowerCase().trim();
   const account = ACCOUNTS[key];
   if (!account) return null;
+  // Compte temporaire (stage) : plus de connexion après la date de fin.
+  if (account.accesJusquau && new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Paris" }) > account.accesJusquau) {
+    console.warn(`Connexion refusée pour "${key}" : accès terminé le ${account.accesJusquau}.`);
+    return null;
+  }
 
   const hash = process.env[account.env];
   if (!hash) {
@@ -115,6 +137,8 @@ export function login(username, password) {
     store: account.store || null,
     tutorOf: account.tutorOf || null,
     storeDataFrom: account.storeDataFrom || null,
+    formationSeule: !!account.formationSeule,
+    accesJusquau: account.accesJusquau || null,
   };
   return { token: jwt.sign(payload, SECRET, { expiresIn: "12h" }), user: payload };
 }
@@ -155,6 +179,20 @@ export function denyTrainee(req, res, next) {
   if (req.user?.role === "trainee") {
     return res.status(403).json({ error: "Cet écran n'est pas accessible depuis votre compte." });
   }
+  next();
+}
+
+/**
+ * Compte limité à la Formation (stagiaire) : tout le reste est refusé,
+ * y compris si le jeton a été émis avant la fin du stage et qu'il est encore
+ * valide après (la date de fin est revérifiée à chaque appel).
+ */
+export function denyFormationSeule(req, res, next) {
+  const u = req.user;
+  if (!u) return next();
+  const fini = u.accesJusquau && new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Paris" }) > u.accesJusquau;
+  if (fini) return res.status(401).json({ error: "Accès terminé." });
+  if (u.formationSeule) return res.status(403).json({ error: "Cet écran n'est pas accessible depuis votre compte." });
   next();
 }
 

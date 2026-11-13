@@ -14,7 +14,7 @@ app.use(cors({ origin: process.env.CORS_ORIGIN || "*" }));
 app.use(express.json());
 
 // ─── Alternance ───────────────────────────────────────────────────────────
-import { requireStoreData, denyTrainee } from "./auth.js";
+import { requireStoreData, denyTrainee, denyFormationSeule } from "./auth.js";
 import { fetchCarnet, createIntervention, updateIntervention, decisionAcquis } from "./carnet.js";
 import { fetchBundle, createHebdo, updateHebdo, updateJalon, validerJalon } from "./alternance.js";
 // Un compte alternant n'accede aux ecrans commerciaux qu'a partir de la date
@@ -23,6 +23,9 @@ import { fetchBundle, createHebdo, updateHebdo, updateJalon, validerJalon } from
 app.use(["/api/results", "/api/visits", "/api/goat", "/api/vendors", "/api/actions", "/api/atm"], requireAuth, requireStoreData);
 // Technicien en formation : pas de visites, pas d'alternance.
 app.use(["/api/visits", "/api/alternance"], requireAuth, denyTrainee);
+// Stagiaire : uniquement la Formation (carnet compris). Tout le reste est fermé.
+app.use(["/api/results", "/api/visits", "/api/goat", "/api/vendors", "/api/actions", "/api/atm",
+  "/api/alternance", "/api/process", "/api/tarifs"], requireAuth, denyFormationSeule);
 
 // ─── Carnet de réparations (famille Formation) ──────────────────────────────
 const carnetErr = (res, e, quoi) => {

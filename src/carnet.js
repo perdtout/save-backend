@@ -73,7 +73,10 @@ export function apprenants() {
     .map(([login, a]) => ({
       login, name: a.name, store: a.store, role: a.role,
       debut: a.debut || null, referent: a.referent || null, doublonJusquau: a.doublonJusquau || null,
-    }));
+      periode: a.periode || "Doublon",
+    }))
+    // Nouveaux embauchés et stagiaires d'abord, alternants ensuite.
+    .sort((x, y) => (x.role === "trainee" ? 0 : 1) - (y.role === "trainee" ? 0 : 1));
 }
 
 // Qui voit le carnet de qui.
