@@ -49,6 +49,8 @@ export const ACCOUNTS = {
     store: "Lons-le-Saunier",
     name: "Maëlle Martin",
     env: "PWD_MAELLE",
+    // Référent formation (carnet de réparations) : son maître d'apprentissage.
+    referent: "Jérôme",
     // Avant cette date, elle ne voit ni le GOAT, ni les résultats du magasin,
     // ni les commentaires. Elle voit son parcours et ses propres compteurs.
     storeDataFrom: "2027-03-01",
