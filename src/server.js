@@ -14,12 +14,33 @@ app.use(cors({ origin: process.env.CORS_ORIGIN || "*" }));
 app.use(express.json());
 
 // ─── Alternance ───────────────────────────────────────────────────────────
-import { requireStoreData } from "./auth.js";
+import { requireStoreData, denyTrainee } from "./auth.js";
+import { fetchCarnet, createIntervention, updateIntervention, decisionAcquis } from "./carnet.js";
 import { fetchBundle, createHebdo, updateHebdo, updateJalon, validerJalon } from "./alternance.js";
 // Un compte alternant n'accede aux ecrans commerciaux qu'a partir de la date
 // portee par son compte. Monte ici, avant les routes concernees : Express
 // applique les middlewares dans l'ordre d'enregistrement.
 app.use(["/api/results", "/api/visits", "/api/goat", "/api/vendors", "/api/actions", "/api/atm"], requireAuth, requireStoreData);
+// Technicien en formation : pas de visites, pas d'alternance.
+app.use(["/api/visits", "/api/alternance"], requireAuth, denyTrainee);
+
+// ─── Carnet de réparations (famille Formation) ──────────────────────────────
+const carnetErr = (res, e, quoi) => {
+  if (!e.status) console.error(`Erreur ${quoi}:`, e.message);
+  res.status(e.status || 502).json({ error: e.status ? e.message : "Carnet indisponible (Google Sheets)", detail: e.message });
+};
+app.get("/api/carnet", requireAuth, async (req, res) => {
+  try { res.json(await fetchCarnet(req.user, req.query.tech || null)); } catch (e) { carnetErr(res, e, "GET /api/carnet"); }
+});
+app.post("/api/carnet", requireAuth, async (req, res) => {
+  try { res.json(await createIntervention(req.user, req.body || {})); } catch (e) { carnetErr(res, e, "POST /api/carnet"); }
+});
+app.patch("/api/carnet/:id", requireAuth, async (req, res) => {
+  try { res.json(await updateIntervention(req.user, req.params.id, req.body || {})); } catch (e) { carnetErr(res, e, "PATCH /api/carnet"); }
+});
+app.post("/api/carnet/acquis", requireAuth, async (req, res) => {
+  try { res.json(await decisionAcquis(req.user, req.body || {})); } catch (e) { carnetErr(res, e, "POST /api/carnet/acquis"); }
+});
 // Le contenu depend du role : le tuteur voit les commentaires, l'alternante non.
 // Une entree de cache par utilisateur, sinon on sert a l'une ce qui est destine a l'autre.
 const altCache = {};
@@ -196,6 +217,7 @@ app.get("/api/health", (req, res) => res.json({
     sheetProcess: !!process.env.GOOGLE_SHEET_PROCESS_ID,
     sheetTarifs:  !!process.env.GOOGLE_SHEET_TARIFS_ID,
     sheetTarifsV2: !!process.env.GOOGLE_SHEET_TARIFS_V2_ID,
+    sheetCarnet:  !!process.env.GOOGLE_SHEET_CARNET_ID,
   },
 }));
 

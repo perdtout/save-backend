@@ -72,6 +72,22 @@ export const ACCOUNTS = {
     // résultats du magasin, ni les commentaires.
     storeDataFrom: "2027-03-01",
   },
+
+  // ── Technicien en formation (nouvel embauché, pas alternant)
+  // Rôle « trainee » : voit les chiffres de son magasin (Piloter), le GOAT,
+  // tout « Au comptoir » et toute la Formation, dont son carnet de
+  // réparations. Ne voit ni les Visites ni l'Alternance (bloqué côté serveur
+  // par denyTrainee, pas seulement masqué dans l'app).
+  killiann: {
+    role: "trainee",
+    store: "Pontarlier",
+    name: "Killiann Correjou",
+    env: "PWD_KILLIANN",
+    debut: "2026-11-17",
+    referent: "Narcisse",
+    // 3 semaines travaillées en doublon (mardi–samedi) : 17/11 → 05/12.
+    doublonJusquau: "2026-12-05",
+  },
 };
 
 /**
@@ -129,6 +145,17 @@ export function requireStoreData(req, res, next) {
   return res.status(403).json({
     error: "Cet écran n'est pas encore accessible depuis votre compte.",
   });
+}
+
+/**
+ * Écrans fermés à un technicien en formation : visites magasin (compte rendu
+ * managérial) et alternance (suivi individuel d'un autre salarié).
+ */
+export function denyTrainee(req, res, next) {
+  if (req.user?.role === "trainee") {
+    return res.status(403).json({ error: "Cet écran n'est pas accessible depuis votre compte." });
+  }
+  next();
 }
 
 // Filtre les données pour ne renvoyer au magasin que ses propres chiffres
